@@ -19,6 +19,9 @@ shift
 [[ "$profile_collector" =~ ^[0-9]+$ && "$profile_minimum" =~ ^[0-9]+([.][0-9]+)?$ ]]
 profile_template=("$@")
 profile_python=${ATLAS_PROFILE_PYTHON:-python}
+profile_timer=${ATLAS_PROFILE_TIMER:-/usr/bin/time}
+if [[ ! -x "$profile_timer" ]]; then profile_timer="$profile_source/bash-profile-time.sh"; fi
+[[ -x "$profile_timer" ]]
 grep -Fxq '# /// script' "$profile_entry"
 
 mkdir -- "$profile_output"
@@ -31,8 +34,9 @@ export LC_ALL=C
 {
     printf 'Workload cwd: %s\n' "$profile_started"
     printf 'Analysis CPU: 18\nCollector / monitor CPU: %s\n' "$profile_collector"
+    printf 'Timer: %s\n' "$profile_timer"
     printf 'Passes: %s\nMinimum pass processing seconds: %s\n' "$profile_passes" "$profile_minimum"
-    uname -s
+    /usr/bin/uname -srm
     if [[ -r /proc/sys/kernel/perf_event_paranoid ]]; then cat /proc/sys/kernel/perf_event_paranoid; fi
     printf 'Analysis affinity probe: '
     taskset -c 18 sh -c 'taskset -pc "$$"'
@@ -42,7 +46,7 @@ export LC_ALL=C
     printf '%q ' "${profile_template[@]}"
     printf '\n'
 } > "$profile_output/configuration.txt"
-sha256sum -- "$profile_entry" "$profile_expected" "$profile_source/"*.py "$profile_source/capture_native.sh" \
+sha256sum -- "$profile_entry" "$profile_expected" "$profile_source/"*.py "$profile_source/capture_native.sh" "$profile_timer" \
     > "$profile_output/input-sha256.txt"
 
 profile_perf=${ATLAS_PROFILE_PERF:-perf}
@@ -87,15 +91,18 @@ profile_run() {
         return 2
     fi
     if [[ $mode == sampled ]]; then
-        prefix=(taskset -c "$profile_collector" /usr/bin/time -f 'wall=%e user=%U system=%S exit=%x' -o "$destination/time.txt"
-                "$profile_perf" record -e cpu-clock:u -F 99 --call-graph dwarf -o "$destination/perf.data" --)
+        prefix=(taskset -c "$profile_collector" "$profile_timer" -f 'wall=%e user=%U system=%S exit=%x' -o "$destination/time.txt"
+                "$profile_perf" record --sample-cpu -e cpu-clock:u -F 99 --call-graph dwarf -o "$destination/perf.data" --)
     else
-        prefix=(/usr/bin/time -f 'wall=%e user=%U system=%S exit=%x' -o "$destination/time.txt")
+        prefix=("$profile_timer" -f 'wall=%e user=%U system=%S exit=%x' -o "$destination/time.txt")
     fi
     command=("${prefix[@]}" taskset -c 18 nice -n 10 "${argv[@]}")
     printf '%q ' "${command[@]}" > "$destination/command.txt"
     printf '\n' >> "$destination/command.txt"
-    "${command[@]}" > "$destination/workload.stdout" 2> "$destination/workload.stderr" &
+    (
+        ulimit -f 262144
+        exec "${command[@]}"
+    ) > "$destination/workload.stdout" 2> "$destination/workload.stderr" &
     local root_pid=$!
     taskset -c "$profile_collector" "$profile_python" "$profile_source/profile_evidence.py" observe \
         "$root_pid" "$destination/processes.jsonl" &

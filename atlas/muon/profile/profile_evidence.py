@@ -174,7 +174,7 @@ def same_sum(actual, rows, key):
 
 def placement(directory, entrypoint, collector_cpu, sampled, allow_transient_fork=False):
     observed = defaultdict(list)
-    collectors = defaultdict(set)
+    collectors = defaultdict(list)
     perf_path = directory.parent / "probe" / "perf.path"
     collector_name = Path(perf_path.read_text().strip()).resolve().name if perf_path.exists() else "perf"
     for line in (directory / "processes.jsonl").read_text().splitlines():
@@ -186,7 +186,7 @@ def placement(directory, entrypoint, collector_cpu, sampled, allow_transient_for
             ):
                 observed[process["pid"]].append(process)
             if executable == collector_name:
-                collectors[process["pid"]].add(process["affinity"])
+                collectors[process["pid"]].append(process)
     transient_forks = []
     if allow_transient_fork and len(observed) > 1:
         owners = set(observed)
@@ -206,13 +206,24 @@ def placement(directory, entrypoint, collector_cpu, sampled, allow_transient_for
     threads = sorted({row["threads"] for row in records})
     if cpus != [str(ANALYSIS_CPU)] or threads != [1]:
         raise ValueError(f"{directory} analysis process has affinities {cpus} and thread counts {threads}")
-    if sampled and (len(collectors) != 1 or list(collectors.values()) != [{str(collector_cpu)}]):
+    perf_forks = []
+    persistent = set(collectors)
+    for child, rows in list(collectors.items()):
+        if len(rows) == 1 and rows[0]["ppid"] in persistent and rows[0]["affinity"] == str(collector_cpu):
+            perf_forks.append({"pid": child, "parent": rows[0]["ppid"], "same_image_samples": 1,
+                               "affinity": rows[0]["affinity"]})
+            del collectors[child]
+    collector_affinity = {
+        key: sorted({row["affinity"] for row in values}) for key, values in collectors.items()
+    }
+    if sampled and (len(collector_affinity) != 1 or list(collector_affinity.values()) != [[str(collector_cpu)]]):
         raise ValueError(f"{directory} does not have one observed perf collector pinned to CPU {collector_cpu}")
     return {
         "pid": pid, "rows_observed": len(records), "affinity": cpus,
         "threads": threads, "binary": file_identity(records[0]["executable"]),
-        "argv": records[0]["argv"], "perf_collector_affinity": {key: sorted(values) for key, values in collectors.items()},
+        "argv": records[0]["argv"], "perf_collector_affinity": collector_affinity,
         "transient_same_image_forks": transient_forks,
+        "transient_same_image_perf_forks": perf_forks,
     }
 
 
@@ -261,7 +272,7 @@ def run_evidence(directory, accepted, entrypoint, repeat, collector_cpu, sampled
         raise ValueError("Run and per-pass processing time totals disagree")
     match = TIME.search((directory / "time.txt").read_text())
     if not match or int(match[4]):
-        raise ValueError(f"Missing successful GNU time measurement in {directory}")
+        raise ValueError(f"Missing successful command timing in {directory}")
     wall, user, system = map(float, match.groups()[:3])
     return {
         "measured_wall_seconds": wall, "measured_user_cpu_seconds": user, "measured_system_cpu_seconds": system,
@@ -447,7 +458,7 @@ def analyze(
     import numpy as np
 
     result = directory / "summary"
-    result.mkdir()
+    result.mkdir(exist_ok=True)
     with np.load(expected_histogram, allow_pickle=False) as accepted:
         control = run_evidence(directory / "control", accepted, entrypoint.resolve(), repeat, collector_cpu, False)
         sampled = None if targeted_only else run_evidence(
@@ -462,7 +473,7 @@ def analyze(
         "counter_support": json.loads(source.read_text()) if source.exists() else None,
         "perf_version": (directory / "probe" / "perf.version").read_text().strip()
                         if (directory / "probe" / "perf.version").exists() else None,
-        "timing_scope": "GNU time spans command launch through exit. Each pass spans original-file open through final fill and source close.",
+        "timing_scope": "The timer identified in configuration.txt spans command launch through exit. Each pass spans original-file open through final fill and source close.",
     }
     if targeted_only:
         denial = directory / "probe" / "sampling-denied.txt"

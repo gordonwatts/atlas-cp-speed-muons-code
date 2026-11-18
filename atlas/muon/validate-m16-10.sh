@@ -32,6 +32,12 @@ mkdir "$out" "$out/source" "$out/C" "$out/B"
         "${clean[@]}" PYTHONPATH="$trial/columnar" "$sdk/bin/python" \
             "$(dirname "$patch")/probe_primary.py" "$out/primary-transport.json"
     fi
+    if [[ "$variant_kind" == M26 ]]; then
+        sed -i 's/"native_lanes": lanes/"native_lanes": {name: int(value) for name, value in lanes.items()}/' \
+            "$trial/measure_columnar_phases.py"
+        "${clean[@]}" PYTHONPATH="$trial/columnar" "$sdk/bin/python" \
+            "$(dirname "$patch")/probe_efficiency_rows.py" edges "$provider" "$prod" "$out/efficiency-edges.json"
+    fi
     "${python[@]}" "$driver" observe "$INPUT" "$out/C/histogram.npz" --observations "$out/C/observations.root" \
         --provider "$provider" --momentum "$trace" --selection "$trace" --efficiency "$trace"
     "${python[@]}" "$scripts/compare_reference.py" "$a" "$out/C/observations.root" \
@@ -41,6 +47,14 @@ mkdir "$out" "$out/source" "$out/C" "$out/B"
     "${python[@]}" "$src/momentum/compare_release_momentum_trace.py" \
         "$ref/release-momentum-trace-01/trace.tsv" "$out/C/observations.root" "$out/release-primitives.json"
     cmp "$out/C/histogram.npz" "$validation/C/histogram.npz"
+    if [[ "$variant_kind" == M26 ]]; then
+        "${clean[@]}" PYTHONPATH="$trial/columnar" "$sdk/bin/python" \
+            "$(dirname "$patch")/probe_efficiency_rows.py" observers \
+            "$validation/C/observations.root" "$out/C/observations.root" "$out/efficiency-observer-exact.json"
+        "${python[@]}" "$trial/measure_columnar_phases.py" "$INPUT" "$provider" "$prod" \
+            "$out/efficiency-phase-histogram.npz" "$out/efficiency-phases.json" "$validation/C/histogram.npz" --chunk-size 2000
+        cmp "$out/efficiency-phase-histogram.npz" "$validation/C/histogram.npz"
+    fi
     cp "$validation/B/compare.json" "$validation/B/histogram.npz" "$out/B/"
     sha256sum "$provider" "$validation/B/compare.json" > "$out/unchanged-framework-witness.txt"
     opts=(--mode full --provider "$provider" --momentum "$prod" --selection "$prod" --efficiency "$prod")
