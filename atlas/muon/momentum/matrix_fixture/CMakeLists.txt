@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+project(atlas_muon_m11_fixture LANGUAGES CXX)
+
+find_package(correctionlib CONFIG REQUIRED)
+find_package(ROOT 6.40.02 EXACT CONFIG REQUIRED COMPONENTS Core Hist MathCore)
+find_package(Eigen3 CONFIG REQUIRED)
+find_path(MUON_RAPIDJSON_INCLUDE_DIR rapidjson/document.h REQUIRED)
+option(M11_CANDIDATE "Use the factored statistical-combination implementation" OFF)
+
+add_executable(m11_fixture matrix_fixture.cxx "${MOMENTUM_SOURCE}/momentum_payload.cxx")
+target_compile_features(m11_fixture PRIVATE cxx_std_23)
+target_compile_definitions(m11_fixture PRIVATE M11_SOURCE="${MOMENTUM_SOURCE}/momentum.cxx")
+if(M11_CANDIDATE)
+    target_compile_definitions(m11_fixture PRIVATE M11_CANDIDATE)
+endif()
+target_include_directories(m11_fixture SYSTEM PRIVATE "${MUON_RAPIDJSON_INCLUDE_DIR}")
+target_link_libraries(m11_fixture PRIVATE correctionlib ROOT::Core ROOT::Hist ROOT::MathCore Eigen3::Eigen)

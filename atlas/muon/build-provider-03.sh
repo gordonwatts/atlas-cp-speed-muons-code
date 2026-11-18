@@ -3,7 +3,7 @@ set -eo pipefail
 campaign=/home/gwatts/atlas-cp-speed/muon-skill-c8a2374-20261117
 repo="$campaign/correctionlib"
 source "$repo/tools/muon_reference/environment.sh"
-source_dir="$repo/atlas/muon"
+source_dir=${3:-$repo/atlas/muon}
 output=${1:?fresh checkpoint provider path required}
 sdk_venv=${2:?pinned SDK venv required}
 mkdir "$output"

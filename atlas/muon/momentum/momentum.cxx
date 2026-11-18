@@ -447,36 +447,42 @@ double sagitta_pt(const Muon& mu, Detector detector, std::optional<double> corre
     return pt;
 }
 
-Status apply_stat_combination(Parameters id, const Covariance& id_cov,
-                              Parameters me, const Covariance& me_cov, int charge,
-                              Parameters& combined, Covariance& combined_cov) {
-    // MuonCalibIntSagittaTool::applyStatCombination, using the same Eigen decomposition.
-    id[4] = std::abs(id[4]);
-    me[4] = std::abs(me[4]);
+struct StatCombinationWeights {
+    Covariance id;
+    Covariance me;
+    Covariance combined;
+    Covariance inverse_sum;
+};
 
+Status prepare_stat_combination(const Covariance& id_cov, const Covariance& me_cov,
+                                StatCombinationWeights& weights) {
+    // MuonCalibIntSagittaTool::applyStatCombination, using the same Eigen decomposition.
     const Eigen::FullPivLU<Covariance> id_lu(id_cov);
     if (!id_lu.isInvertible()) return error;
-    const Covariance id_weight = id_lu.inverse();
+    weights.id = id_lu.inverse();
     const Eigen::FullPivLU<Covariance> me_lu(me_cov);
     if (!me_lu.isInvertible()) return error;
-    const Covariance me_weight = me_lu.inverse();
-    const Eigen::FullPivLU<Covariance> combined_lu(id_weight + me_weight);
+    weights.me = me_lu.inverse();
+    const Eigen::FullPivLU<Covariance> combined_lu(weights.id + weights.me);
     if (!combined_lu.isInvertible()) return error;
-    combined_cov = combined_lu.inverse();
+    weights.combined = combined_lu.inverse();
     const Eigen::FullPivLU<Covariance> sum_lu(id_cov + me_cov);
     if (!sum_lu.isInvertible()) return error;
+    weights.inverse_sum = sum_lu.inverse();
+    return ok;
+}
 
+void combine_stat_parameters(const Parameters& id, const Parameters& me, int charge,
+                             const StatCombinationWeights& weights, Parameters& combined) {
     // Retain the source chi2 calculation for its numerical domain.
-    const Covariance inverse_sum = sum_lu.inverse();
     const Parameters difference = id - me;
-    [[maybe_unused]] double chi2 = difference.transpose() * inverse_sum * difference;
+    [[maybe_unused]] double chi2 = difference.transpose() * weights.inverse_sum * difference;
     chi2 = chi2 / 5.;
 
-    combined = combined_cov * (id_weight * id + me_weight * me);
+    combined = weights.combined * (weights.id * id + weights.me * me);
     combined[4] *= charge;
     if (combined[2] > std::numbers::pi) combined[2] -= 2. * std::numbers::pi;
     else if (combined[2] < -std::numbers::pi) combined[2] += 2. * std::numbers::pi;
-    return ok;
 }
 
 double stat_combination(const Muon& mu, double id_corrected, double me_corrected, double& status) {
@@ -488,12 +494,8 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
         return cb.pt;
     }
 
-    Parameters cb_nominal = cb.parameters;
     Parameters id_parameters = id.parameters;
     Parameters me_parameters = me.parameters;
-    Covariance cb_nominal_cov = cb.covariance;
-    Parameters cb_corrected;
-    Covariance cb_corrected_cov;
 
     AngularVector tlv{id.pt, mu.eta, mu.phi, id.mass};
     auto inverse_momentum = [&]() { return tlv.P() == 0 ? 1e12 : 1.0 / (tlv.P() * 1e3); };
@@ -501,18 +503,24 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
     tlv.SetCoordinates(me.pt, mu.eta, mu.phi, me.mass);
     me_parameters[4] = inverse_momentum();
 
-    status = apply_stat_combination(id_parameters, id.covariance, me_parameters, me.covariance,
-                                    cb.charge, cb_nominal, cb_nominal_cov);
+    id_parameters[4] = std::abs(id_parameters[4]);
+    me_parameters[4] = std::abs(me_parameters[4]);
+    StatCombinationWeights weights;
+    status = prepare_stat_combination(id.covariance, me.covariance, weights);
     if (status != ok) return cb.pt;
+
+    Parameters cb_nominal;
+    combine_stat_parameters(id_parameters, me_parameters, cb.charge, weights, cb_nominal);
 
     tlv.SetCoordinates(id_corrected, mu.eta, mu.phi, id.mass);
     id_parameters[4] = inverse_momentum();
     tlv.SetCoordinates(me_corrected, mu.eta, mu.phi, me.mass);
     me_parameters[4] = inverse_momentum();
 
-    status = apply_stat_combination(id_parameters, id.covariance, me_parameters, me.covariance,
-                                    cb.charge, cb_corrected, cb_corrected_cov);
-    if (status != ok) return cb.pt;
+    id_parameters[4] = std::abs(id_parameters[4]);
+    me_parameters[4] = std::abs(me_parameters[4]);
+    Parameters cb_corrected;
+    combine_stat_parameters(id_parameters, me_parameters, cb.charge, weights, cb_corrected);
 
     const double pt_nominal = std::sin(cb_nominal[3]) / std::abs(cb_nominal[4]);
     const double pt_corrected = std::sin(cb_corrected[3]) / std::abs(cb_corrected[4]);
