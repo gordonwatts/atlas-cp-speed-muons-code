@@ -203,11 +203,17 @@ def distribution_edges(quantity):
 
 def pair_counts(values):
     finite = values[np.isfinite(values)]
-    counts = {f"{key:g}": int(n) for key, n in zip(*np.unique(finite, return_counts=True), strict=True)}
+    counts = {}
+    for key, n in zip(*np.unique(finite, return_counts=True), strict=True):
+        value = key.item()
+        label = str(int(value)) if value == int(value) else repr(value)
+        counts[label] = int(n)
     for name, code in (("NaN", 1), ("+inf", 2), ("-inf", 3)):
         tally = int(np.count_nonzero(exception_code(values) == code))
         if tally:
             counts[name] = tally
+    if sum(counts.values()) != len(values):
+        raise ValueError("Category keys did not preserve every observed row")
     return counts
 
 

@@ -6,7 +6,7 @@ source "$repo/tools/muon_reference/environment.sh"
 result=${1:?existing checkpoint result path required}
 sdk=${2:?pinned SDK venv required}
 contract=${3:?frozen acceptance path required}
-out="$result/diagnostics-01"
+out="$result/${4:-diagnostics-01}"
 mkdir "$out"
 ref="$campaign/results/checkpoint-02"
 a="$ref/full-observer-01"
