@@ -97,6 +97,61 @@ struct Muon {
     Period year = run4;
 };
 
+using GaussianDraws = std::array<double, 6>;
+constexpr std::size_t rng_cache_slots = 8192;
+
+struct GaussianCacheEntry {
+    GaussianDraws draws;
+    std::uint32_t seed;
+    bool valid;
+};
+
+thread_local std::array<GaussianCacheEntry, rng_cache_slots> rng_cache{};
+
+#ifdef ATLAS_MUON_M01_STATS
+struct GaussianCacheCounts {
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+    std::uint64_t overwrites = 0;
+    std::uint64_t zero_bypasses = 0;
+};
+thread_local GaussianCacheCounts rng_cache_counts{};
+#endif
+
+GaussianDraws draw_gaussians(std::uint32_t seed) {
+    TRandom3 random;
+    random.SetSeed(seed);
+    GaussianDraws draws;
+    for (double& draw : draws) draw = random.Gaus(0, 1);
+    return draws;
+}
+
+GaussianDraws gaussians_for_seed(std::uint32_t seed) {
+    if (seed == 0) {
+#ifdef ATLAS_MUON_M01_STATS
+        ++rng_cache_counts.zero_bypasses;
+#endif
+        // ROOT uses its entropy path for zero.
+        return draw_gaussians(seed);
+    }
+
+    auto& entry = rng_cache[seed & (rng_cache_slots - 1)];
+    if (entry.valid && entry.seed == seed) {
+#ifdef ATLAS_MUON_M01_STATS
+        ++rng_cache_counts.hits;
+#endif
+        return entry.draws;
+    }
+#ifdef ATLAS_MUON_M01_STATS
+    ++rng_cache_counts.misses;
+    if (entry.valid) ++rng_cache_counts.overwrites;
+#endif
+    entry.draws = draw_gaussians(seed);
+    entry.seed = seed;
+    entry.valid = true;
+    return entry.draws;
+}
+
 std::uint32_t unsigned_limb(std::int64_t value) {
     if (value < 0 || value > std::numeric_limits<std::uint32_t>::max()) {
         throw std::invalid_argument("Momentum run/event limb must be in the unsigned 32-bit range");
@@ -606,12 +661,11 @@ private:
             result[raw_id_out] = mu.tracks[ID].raw_pt;
             result[raw_me_out] = mu.tracks[ME].raw_pt;
 
-            TRandom3 random;
             const UInt_t seed = 1 + std::abs(mu.phi) * 1E6 + std::abs(mu.eta) * 1E3 + event;
-            random.SetSeed(seed);
+            mu.gaussian = gaussians_for_seed(seed);
             result[seed_out] = seed;
             for (std::size_t i = 0; i < mu.gaussian.size(); ++i) {
-                mu.gaussian[i] = result[g0_out + i] = random.Gaus(0, 1);
+                result[g0_out + i] = mu.gaussian[i];
             }
 
             const auto& maps = payload_.periods[mu.year];
@@ -674,3 +728,28 @@ void register_momentum(correction::PluginRegistry& registry) {
             return std::make_shared<atlas::momentum::MomentumNode>(config, context);
         });
 }
+
+#ifdef ATLAS_MUON_M01_STATS
+// Test-only symbols. Each call observes the calling thread's table.
+extern "C" void atlas_muon_m01_rng_cache_counts(std::uint64_t* output) {
+    const auto& counts = atlas::momentum::rng_cache_counts;
+    output[0] = counts.hits;
+    output[1] = counts.misses;
+    output[2] = counts.overwrites;
+    output[3] = counts.zero_bypasses;
+}
+
+extern "C" void atlas_muon_m01_rng_cache_reset() {
+    for (auto& entry : atlas::momentum::rng_cache) entry.valid = false;
+    atlas::momentum::rng_cache_counts = {};
+}
+
+extern "C" std::size_t atlas_muon_m01_rng_cache_bytes() {
+    return sizeof(atlas::momentum::rng_cache);
+}
+
+extern "C" void atlas_muon_m01_rng_probe_seed(std::uint32_t seed, double* output) {
+    const auto draws = atlas::momentum::gaussians_for_seed(seed);
+    std::copy(draws.begin(), draws.end(), output);
+}
+#endif
