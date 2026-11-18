@@ -1,0 +1,542 @@
+{
+  "description": "Analytical selection boundary probes expressed in stored quantities. The runtime owner must verify these and the full release reference.",
+  "eta": [
+    {
+      "arguments": [
+        2.700000047683716
+      ],
+      "expected": 4294967295
+    },
+    {
+      "arguments": [
+        -2.700000047683716
+      ],
+      "expected": 4294967295
+    },
+    {
+      "arguments": [
+        2.700000286102295
+      ],
+      "expected": 4294967294
+    }
+  ],
+  "vertex": [
+    {
+      "arguments": [
+        1
+      ],
+      "expected": 1
+    },
+    {
+      "arguments": [
+        3
+      ],
+      "expected": 0
+    }
+  ],
+  "track_roles": [
+    {
+      "arguments": [
+        0,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        3,
+        1
+      ]
+    },
+    {
+      "arguments": [
+        0,
+        0,
+        1,
+        0,
+        1,
+        1
+      ],
+      "expected": [
+        0,
+        0
+      ]
+    },
+    {
+      "arguments": [
+        3,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        1
+      ]
+    },
+    {
+      "arguments": [
+        1,
+        0,
+        0,
+        0,
+        1,
+        1
+      ],
+      "expected": [
+        4,
+        4
+      ]
+    },
+    {
+      "arguments": [
+        5,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "expected": [
+        5,
+        5
+      ]
+    },
+    {
+      "arguments": [
+        4,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "expected": [
+        3,
+        3
+      ]
+    }
+  ],
+  "after_calibration_defaults": {
+    "eta_bits": 4294967295,
+    "pt": 20000,
+    "eta": 0,
+    "phi": 0,
+    "id_pt": 20000,
+    "me_pt": 20000,
+    "calibrated_track_momenta_available": 1,
+    "muon_type": 0,
+    "author": 1,
+    "all_authors": 2,
+    "primary_role": 3,
+    "id_link_valid": 1,
+    "me_link_valid": 1,
+    "cb_link_valid": 1,
+    "primary_d0": 0.2,
+    "primary_phi": 0,
+    "primary_z0": 0.1,
+    "primary_vz": 0,
+    "primary_var_d0": 0.01,
+    "primary_cov_diag_size": 5,
+    "pv_z": 0,
+    "beam_sigma_x": 0,
+    "beam_sigma_y": 0,
+    "beam_sigma_xy": 0,
+    "pixel_hits": 1,
+    "pixel_dead": 0,
+    "sct_hits": 5,
+    "sct_dead": 0,
+    "pixel_holes": 0,
+    "sct_holes": 0,
+    "id_q_over_p": 0.00005,
+    "me_q_over_p": 0.00005,
+    "cb_q_over_p": 0.00005,
+    "id_theta": 1.5707963705062866,
+    "me_theta": 1.5707963705062866,
+    "cb_theta": 1.5707963705062866,
+    "cb_phi": 0,
+    "id_var_q_over_p": 1e-10,
+    "me_var_q_over_p": 1e-10,
+    "cb_var_q_over_p": 1e-10,
+    "id_cov_diag_size": 5,
+    "me_cov_diag_size": 5,
+    "cb_cov_diag_size": 5,
+    "precision_layers": 2,
+    "precision_hole_layers": 0,
+    "good_precision_layers": 2,
+    "inner_small_hits": 0,
+    "inner_large_hits": 0,
+    "middle_small_hits": 3,
+    "middle_large_hits": 0,
+    "outer_small_hits": 3,
+    "outer_large_hits": 0,
+    "extended_small_hits": 0,
+    "extended_large_hits": 0,
+    "extended_small_holes": 0,
+    "is_small_good_sectors": 1,
+    "eta_layer1_stgc_hits": 2,
+    "eta_layer2_stgc_hits": 2,
+    "mm_hits": 0,
+    "combined_out_of_bounds_hits": 0,
+    "calo_score": 0,
+    "calo_score_available": 1,
+    "lowpt_parameters_mask": 7,
+    "track_iso": 100,
+    "neutral_iso": 0,
+    "isolation_available_mask": 3
+  },
+  "after_calibration": [
+    {
+      "id": "central_combined",
+      "overrides": {},
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "raw_eta_short_circuit",
+      "overrides": {
+        "eta_bits": 4294967294,
+        "primary_cov_diag_size": 0
+      },
+      "expected": [
+        4294967294,
+        4294967288,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "pt_just_below_cut",
+      "overrides": {
+        "pt": 2999.999755859375
+      },
+      "expected": [
+        4294967294,
+        4294967288,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "pt_at_cut",
+      "overrides": {
+        "pt": 3000
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "no_primary",
+      "overrides": {
+        "primary_role": 0
+      },
+      "expected": [
+        4294967295,
+        4294967288,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d0_significance_at_strict_limit",
+      "overrides": {
+        "primary_d0": 3,
+        "primary_var_d0": 1
+      },
+      "expected": [
+        4294967295,
+        4294967293,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d0_missing_covariance",
+      "overrides": {
+        "primary_cov_diag_size": -1
+      },
+      "expected": [
+        4294967295,
+        4294967293,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "bad_beam_covariance",
+      "overrides": {
+        "beam_sigma_xy": 1
+      },
+      "expected": [
+        4294967295,
+        4294967293,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "z0_at_strict_limit",
+      "overrides": {
+        "primary_z0": 0.5
+      },
+      "expected": [
+        4294967295,
+        4294967291,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "near_limit_with_selected_vertex",
+      "overrides": {
+        "primary_z0": 0.75,
+        "pv_z": 0.5
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "quality_eta_strict",
+      "overrides": {
+        "eta": 2.700000047683716
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "medium_hits_one_station",
+      "overrides": {
+        "precision_layers": 1,
+        "precision_hole_layers": 1
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "medium_hits_two_holes",
+      "overrides": {
+        "precision_layers": 1,
+        "precision_hole_layers": 2
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "medium_hits_out_of_bounds",
+      "overrides": {
+        "combined_out_of_bounds_hits": 1
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "bad_muon_independent_of_quality",
+      "overrides": {
+        "me_var_q_over_p": -1e-10
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        0,
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "bad_muon_relative_uncertainty",
+      "overrides": {
+        "id_var_q_over_p": 1e-11
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "standalone_nsw_recount",
+      "overrides": {
+        "eta": 2.6,
+        "muon_type": 1,
+        "author": 5,
+        "primary_role": 2,
+        "id_link_valid": 0,
+        "cb_link_valid": 0,
+        "combined_out_of_bounds_hits": -1
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "silicon_forward",
+      "overrides": {
+        "eta": 2.6,
+        "muon_type": 4,
+        "cb_theta": 0.1,
+        "combined_out_of_bounds_hits": -1
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "isolation_equality_passes",
+      "overrides": {
+        "track_iso": 900
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "isolation_negative_track_uses_absolute_value",
+      "overrides": {
+        "track_iso": -901
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "isolation_negative_neutral_clamps",
+      "overrides": {
+        "track_iso": 900,
+        "neutral_iso": -1000
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "isolation_missing_track",
+      "overrides": {
+        "isolation_available_mask": 2
+      },
+      "expected": [
+        4294967295,
+        4294967295,
+        1,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "exceptions": [
+    {
+      "id": "primary_covariance_vector_empty",
+      "overrides": {
+        "primary_cov_diag_size": 0
+      }
+    },
+    {
+      "id": "missing_calibrated_track_pt",
+      "overrides": {
+        "calibrated_track_momenta_available": 0
+      }
+    },
+    {
+      "id": "nsw_is_required_when_recounted",
+      "overrides": {
+        "eta": 1.6,
+        "eta_layer1_stgc_hits": -1
+      }
+    },
+    {
+      "id": "auxiliary_low_pt_missing_parameter",
+      "overrides": {
+        "pt": 14000,
+        "lowpt_parameters_mask": 3
+      }
+    }
+  ]
+}

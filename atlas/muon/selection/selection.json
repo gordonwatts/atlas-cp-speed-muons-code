@@ -1,0 +1,594 @@
+{
+  "schema_version": 3,
+  "description": "AnalysisBase 25.2.117 run-3 Medium, PflowTight_VarRad and muon track selection",
+  "corrections": [
+    {
+      "name": "muon_selection_eta",
+      "version": 1,
+      "inputs": [{"name": "raw_eta", "type": "real"}],
+      "output": {"name": "eta_bits", "type": "real"},
+      "data": {"nodetype": "extension", "type": "atlas.muon_selection.eta", "version": 1, "config": {"max_eta": 2.7}}
+    },
+    {
+      "name": "muon_selection_vertex",
+      "version": 1,
+      "inputs": [{"name": "vertex_type", "type": "int"}],
+      "output": {"name": "is_primary", "type": "real"},
+      "data": {"nodetype": "category", "input": "vertex_type", "content": [{"key": 1, "value": 1.0}], "default": 0.0}
+    },
+    {
+      "name": "muon_selection_track_roles",
+      "version": 1,
+      "inputs": [
+        {"name": "muon_type", "type": "int"},
+        {"name": "id_link_valid", "type": "int"},
+        {"name": "me_link_valid", "type": "int"},
+        {"name": "cb_link_valid", "type": "int"},
+        {"name": "msonly_link_valid", "type": "int"},
+        {"name": "ms_link_valid", "type": "int"}
+      ],
+      "output": {"name": "track_roles", "type": "real", "shape": [2], "description": "primary_role, id_summary_role"},
+      "data": {"nodetype": "extension", "type": "atlas.muon_selection.track_roles", "version": 1, "output_shape": [2], "config": {}}
+    },
+    {
+      "name": "muon_selection_after_calibration",
+      "version": 1,
+      "inputs": [
+        {"name": "eta_bits", "type": "int"},
+        {"name": "pt", "type": "real"},
+        {"name": "eta", "type": "real"},
+        {"name": "phi", "type": "real"},
+        {"name": "id_pt", "type": "real"},
+        {"name": "me_pt", "type": "real"},
+        {"name": "calibrated_track_momenta_available", "type": "int"},
+        {"name": "muon_type", "type": "int"},
+        {"name": "author", "type": "int"},
+        {"name": "all_authors", "type": "int"},
+        {"name": "primary_role", "type": "int"},
+        {"name": "id_link_valid", "type": "int"},
+        {"name": "me_link_valid", "type": "int"},
+        {"name": "cb_link_valid", "type": "int"},
+        {"name": "primary_d0", "type": "real"},
+        {"name": "primary_phi", "type": "real"},
+        {"name": "primary_z0", "type": "real"},
+        {"name": "primary_vz", "type": "real"},
+        {"name": "primary_var_d0", "type": "real"},
+        {"name": "primary_cov_diag_size", "type": "int"},
+        {"name": "pv_z", "type": "real"},
+        {"name": "beam_sigma_x", "type": "real"},
+        {"name": "beam_sigma_y", "type": "real"},
+        {"name": "beam_sigma_xy", "type": "real"},
+        {"name": "pixel_hits", "type": "int"},
+        {"name": "pixel_dead", "type": "int"},
+        {"name": "sct_hits", "type": "int"},
+        {"name": "sct_dead", "type": "int"},
+        {"name": "pixel_holes", "type": "int"},
+        {"name": "sct_holes", "type": "int"},
+        {"name": "id_q_over_p", "type": "real"},
+        {"name": "me_q_over_p", "type": "real"},
+        {"name": "cb_q_over_p", "type": "real"},
+        {"name": "id_theta", "type": "real"},
+        {"name": "me_theta", "type": "real"},
+        {"name": "cb_theta", "type": "real"},
+        {"name": "cb_phi", "type": "real"},
+        {"name": "id_var_q_over_p", "type": "real"},
+        {"name": "me_var_q_over_p", "type": "real"},
+        {"name": "cb_var_q_over_p", "type": "real"},
+        {"name": "id_cov_diag_size", "type": "int"},
+        {"name": "me_cov_diag_size", "type": "int"},
+        {"name": "cb_cov_diag_size", "type": "int"},
+        {"name": "precision_layers", "type": "int"},
+        {"name": "precision_hole_layers", "type": "int"},
+        {"name": "good_precision_layers", "type": "int"},
+        {"name": "inner_small_hits", "type": "int"},
+        {"name": "inner_large_hits", "type": "int"},
+        {"name": "middle_small_hits", "type": "int"},
+        {"name": "middle_large_hits", "type": "int"},
+        {"name": "outer_small_hits", "type": "int"},
+        {"name": "outer_large_hits", "type": "int"},
+        {"name": "extended_small_hits", "type": "int"},
+        {"name": "extended_large_hits", "type": "int"},
+        {"name": "extended_small_holes", "type": "int"},
+        {"name": "is_small_good_sectors", "type": "int"},
+        {"name": "eta_layer1_stgc_hits", "type": "int"},
+        {"name": "eta_layer2_stgc_hits", "type": "int"},
+        {"name": "mm_hits", "type": "int"},
+        {"name": "combined_out_of_bounds_hits", "type": "int"},
+        {"name": "calo_score", "type": "real"},
+        {"name": "calo_score_available", "type": "int"},
+        {"name": "lowpt_parameters_mask", "type": "int"},
+        {"name": "track_iso", "type": "real"},
+        {"name": "neutral_iso", "type": "real"},
+        {"name": "isolation_available_mask", "type": "int"}
+      ],
+      "output": {
+        "name": "selection",
+        "type": "real",
+        "shape": [6],
+        "description": "pt_bits, track_bits, medium, bad_muon, isolation, final"
+      },
+      "data": {
+        "nodetype": "extension",
+        "type": "atlas.muon_selection.after_calibration",
+        "version": 1,
+        "output_shape": [6],
+        "config": {
+          "stage": "all",
+          "min_pt_mev": 3000.0,
+          "max_d0_significance": 3.0,
+          "max_delta_z0_sin_theta_mm": 0.5,
+          "medium_max_eta": 2.7,
+          "iso_neutral_weight": 0.4,
+          "iso_relative_cut": 0.045
+        }
+      }
+    },
+    {
+      "name": "muon_selection_pt",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real"
+        }
+      ],
+      "output": {
+        "name": "pt_bits",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "extension",
+        "type": "atlas.muon_selection.after_calibration",
+        "version": 1,
+        "config": {
+          "stage": "pt",
+          "min_pt_mev": 3000,
+          "max_d0_significance": 3,
+          "max_delta_z0_sin_theta_mm": 0.5,
+          "medium_max_eta": 2.7,
+          "iso_neutral_weight": 0.4,
+          "iso_relative_cut": 0.045
+        }
+      }
+    },
+    {
+      "name": "muon_selection_track",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real"
+        },
+        {
+          "name": "eta",
+          "type": "real"
+        },
+        {
+          "name": "phi",
+          "type": "real"
+        },
+        {
+          "name": "primary_role",
+          "type": "int"
+        },
+        {
+          "name": "primary_d0",
+          "type": "real"
+        },
+        {
+          "name": "primary_phi",
+          "type": "real"
+        },
+        {
+          "name": "primary_z0",
+          "type": "real"
+        },
+        {
+          "name": "primary_vz",
+          "type": "real"
+        },
+        {
+          "name": "primary_var_d0",
+          "type": "real"
+        },
+        {
+          "name": "primary_cov_diag_size",
+          "type": "int"
+        },
+        {
+          "name": "pv_z",
+          "type": "real"
+        },
+        {
+          "name": "beam_sigma_x",
+          "type": "real"
+        },
+        {
+          "name": "beam_sigma_y",
+          "type": "real"
+        },
+        {
+          "name": "beam_sigma_xy",
+          "type": "real"
+        }
+      ],
+      "output": {
+        "name": "track_bits",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "extension",
+        "type": "atlas.muon_selection.after_calibration",
+        "version": 1,
+        "config": {
+          "stage": "track",
+          "min_pt_mev": 3000,
+          "max_d0_significance": 3,
+          "max_delta_z0_sin_theta_mm": 0.5,
+          "medium_max_eta": 2.7,
+          "iso_neutral_weight": 0.4,
+          "iso_relative_cut": 0.045
+        }
+      }
+    },
+    {
+      "name": "muon_selection_quality",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real"
+        },
+        {
+          "name": "eta",
+          "type": "real"
+        },
+        {
+          "name": "id_pt",
+          "type": "real"
+        },
+        {
+          "name": "me_pt",
+          "type": "real"
+        },
+        {
+          "name": "calibrated_track_momenta_available",
+          "type": "int"
+        },
+        {
+          "name": "muon_type",
+          "type": "int"
+        },
+        {
+          "name": "author",
+          "type": "int"
+        },
+        {
+          "name": "all_authors",
+          "type": "int"
+        },
+        {
+          "name": "primary_role",
+          "type": "int"
+        },
+        {
+          "name": "id_link_valid",
+          "type": "int"
+        },
+        {
+          "name": "me_link_valid",
+          "type": "int"
+        },
+        {
+          "name": "cb_link_valid",
+          "type": "int"
+        },
+        {
+          "name": "pixel_hits",
+          "type": "int"
+        },
+        {
+          "name": "pixel_dead",
+          "type": "int"
+        },
+        {
+          "name": "sct_hits",
+          "type": "int"
+        },
+        {
+          "name": "sct_dead",
+          "type": "int"
+        },
+        {
+          "name": "pixel_holes",
+          "type": "int"
+        },
+        {
+          "name": "sct_holes",
+          "type": "int"
+        },
+        {
+          "name": "id_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "me_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "cb_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "id_theta",
+          "type": "real"
+        },
+        {
+          "name": "me_theta",
+          "type": "real"
+        },
+        {
+          "name": "cb_theta",
+          "type": "real"
+        },
+        {
+          "name": "cb_phi",
+          "type": "real"
+        },
+        {
+          "name": "id_var_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "me_var_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "cb_var_q_over_p",
+          "type": "real"
+        },
+        {
+          "name": "id_cov_diag_size",
+          "type": "int"
+        },
+        {
+          "name": "me_cov_diag_size",
+          "type": "int"
+        },
+        {
+          "name": "cb_cov_diag_size",
+          "type": "int"
+        },
+        {
+          "name": "precision_layers",
+          "type": "int"
+        },
+        {
+          "name": "precision_hole_layers",
+          "type": "int"
+        },
+        {
+          "name": "good_precision_layers",
+          "type": "int"
+        },
+        {
+          "name": "inner_small_hits",
+          "type": "int"
+        },
+        {
+          "name": "inner_large_hits",
+          "type": "int"
+        },
+        {
+          "name": "middle_small_hits",
+          "type": "int"
+        },
+        {
+          "name": "middle_large_hits",
+          "type": "int"
+        },
+        {
+          "name": "outer_small_hits",
+          "type": "int"
+        },
+        {
+          "name": "outer_large_hits",
+          "type": "int"
+        },
+        {
+          "name": "extended_small_hits",
+          "type": "int"
+        },
+        {
+          "name": "extended_large_hits",
+          "type": "int"
+        },
+        {
+          "name": "extended_small_holes",
+          "type": "int"
+        },
+        {
+          "name": "is_small_good_sectors",
+          "type": "int"
+        },
+        {
+          "name": "eta_layer1_stgc_hits",
+          "type": "int"
+        },
+        {
+          "name": "eta_layer2_stgc_hits",
+          "type": "int"
+        },
+        {
+          "name": "mm_hits",
+          "type": "int"
+        },
+        {
+          "name": "combined_out_of_bounds_hits",
+          "type": "int"
+        },
+        {
+          "name": "calo_score",
+          "type": "real"
+        },
+        {
+          "name": "calo_score_available",
+          "type": "int"
+        },
+        {
+          "name": "lowpt_parameters_mask",
+          "type": "int"
+        }
+      ],
+      "output": {
+        "name": "medium_and_bad_muon",
+        "type": "real",
+        "shape": [
+          2
+        ],
+        "description": "medium, bad_muon"
+      },
+      "data": {
+        "nodetype": "extension",
+        "type": "atlas.muon_selection.after_calibration",
+        "version": 1,
+        "output_shape": [
+          2
+        ],
+        "config": {
+          "stage": "quality",
+          "min_pt_mev": 3000,
+          "max_d0_significance": 3,
+          "max_delta_z0_sin_theta_mm": 0.5,
+          "medium_max_eta": 2.7,
+          "iso_neutral_weight": 0.4,
+          "iso_relative_cut": 0.045
+        }
+      }
+    },
+    {
+      "name": "muon_selection_isolation",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real"
+        },
+        {
+          "name": "track_iso",
+          "type": "real"
+        },
+        {
+          "name": "neutral_iso",
+          "type": "real"
+        },
+        {
+          "name": "isolation_available_mask",
+          "type": "int"
+        }
+      ],
+      "output": {
+        "name": "isolation",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "extension",
+        "type": "atlas.muon_selection.after_calibration",
+        "version": 1,
+        "config": {
+          "stage": "isolation",
+          "min_pt_mev": 3000,
+          "max_d0_significance": 3,
+          "max_delta_z0_sin_theta_mm": 0.5,
+          "medium_max_eta": 2.7,
+          "iso_neutral_weight": 0.4,
+          "iso_relative_cut": 0.045
+        }
+      }
+    },
+    {
+      "name": "muon_selection_final",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "eta_bits",
+          "type": "int"
+        },
+        {
+          "name": "pt_bits",
+          "type": "int"
+        },
+        {
+          "name": "track_bits",
+          "type": "int"
+        },
+        {
+          "name": "medium",
+          "type": "int"
+        },
+        {
+          "name": "isolated",
+          "type": "int"
+        }
+      ],
+      "output": {
+        "name": "selected",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "binning",
+        "input": "eta_bits",
+        "edges": [
+          4294967295.0,
+          4294967296.0
+        ],
+        "content": [
+          {
+            "nodetype": "binning",
+            "input": "pt_bits",
+            "edges": [
+              4294967295.0,
+              4294967296.0
+            ],
+            "content": [
+              {
+                "nodetype": "binning",
+                "input": "track_bits",
+                "edges": [
+                  4294967295.0,
+                  4294967296.0
+                ],
+                "content": [
+                  {
+                    "nodetype": "category",
+                    "input": "medium",
+                    "content": [
+                      {
+                        "key": 1,
+                        "value": {
+                          "nodetype": "category",
+                          "input": "isolated",
+                          "content": [
+                            {
+                              "key": 1,
+                              "value": 1
+                            }
+                          ],
+                          "default": 0
+                        }
+                      }
+                    ],
+                    "default": 0
+                  }
+                ],
+                "flow": 0
+              }
+            ],
+            "flow": 0
+          }
+        ],
+        "flow": 0
+      }
+    }
+  ]
+}

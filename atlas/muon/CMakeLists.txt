@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.20)
+project(atlas_muon LANGUAGES CXX)
+
+find_package(correctionlib CONFIG REQUIRED)
+option(ATLAS_MUON_BUILD_MOMENTUM "Build the original-stream muon momentum provider" ON)
+
+set(common_sources provider.cxx efficiency/efficiency.cc selection/selection.cc)
+add_library(atlas_muon_selection_efficiency SHARED ${common_sources})
+target_compile_features(atlas_muon_selection_efficiency PRIVATE cxx_std_23)
+target_link_libraries(atlas_muon_selection_efficiency PRIVATE correctionlib)
+
+if(ATLAS_MUON_BUILD_MOMENTUM)
+    find_package(ROOT 6.40.02 EXACT CONFIG REQUIRED COMPONENTS Core Hist MathCore)
+    find_package(Eigen3 CONFIG REQUIRED)
+    find_path(MUON_RAPIDJSON_INCLUDE_DIR rapidjson/document.h REQUIRED)
+    add_library(atlas_muon SHARED ${common_sources} momentum/momentum.cxx momentum/momentum_payload.cxx)
+    target_compile_features(atlas_muon PRIVATE cxx_std_23)
+    target_compile_definitions(atlas_muon PRIVATE ATLAS_MUON_WITH_MOMENTUM)
+    target_include_directories(atlas_muon SYSTEM PRIVATE "${MUON_RAPIDJSON_INCLUDE_DIR}")
+    target_link_libraries(atlas_muon PRIVATE correctionlib ROOT::Core ROOT::Hist ROOT::MathCore Eigen3::Eigen)
+endif()

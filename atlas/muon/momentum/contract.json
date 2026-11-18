@@ -1,0 +1,370 @@
+{
+  "correction": "muon_momentum",
+  "node": "atlas.muon_momentum",
+  "version": 1,
+  "production_output_count": 12,
+  "inputs": [
+    {
+      "name": "systematic",
+      "type": "string"
+    },
+    {
+      "name": "called",
+      "type": "int"
+    },
+    {
+      "name": "run_number",
+      "type": "int"
+    },
+    {
+      "name": "event_number_lo",
+      "type": "int"
+    },
+    {
+      "name": "event_number_hi",
+      "type": "int"
+    },
+    {
+      "name": "is_simulation",
+      "type": "int"
+    },
+    {
+      "name": "muon_type",
+      "type": "int"
+    },
+    {
+      "name": "mu_pt",
+      "type": "real"
+    },
+    {
+      "name": "mu_eta",
+      "type": "real"
+    },
+    {
+      "name": "mu_phi",
+      "type": "real"
+    },
+    {
+      "name": "mu_charge",
+      "type": "real"
+    },
+    {
+      "name": "cb_valid",
+      "type": "int"
+    },
+    {
+      "name": "cb_d0",
+      "type": "real"
+    },
+    {
+      "name": "cb_z0",
+      "type": "real"
+    },
+    {
+      "name": "cb_phi",
+      "type": "real"
+    },
+    {
+      "name": "cb_theta",
+      "type": "real"
+    },
+    {
+      "name": "cb_q_over_p",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "cb_cov_off_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "cb_cov_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_5",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_6",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_7",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_8",
+      "type": "real"
+    },
+    {
+      "name": "cb_cov_off_diag_9",
+      "type": "real"
+    },
+    {
+      "name": "id_valid",
+      "type": "int"
+    },
+    {
+      "name": "id_d0",
+      "type": "real"
+    },
+    {
+      "name": "id_z0",
+      "type": "real"
+    },
+    {
+      "name": "id_phi",
+      "type": "real"
+    },
+    {
+      "name": "id_theta",
+      "type": "real"
+    },
+    {
+      "name": "id_q_over_p",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "id_cov_off_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "id_cov_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_5",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_6",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_7",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_8",
+      "type": "real"
+    },
+    {
+      "name": "id_cov_off_diag_9",
+      "type": "real"
+    },
+    {
+      "name": "me_valid",
+      "type": "int"
+    },
+    {
+      "name": "me_d0",
+      "type": "real"
+    },
+    {
+      "name": "me_z0",
+      "type": "real"
+    },
+    {
+      "name": "me_phi",
+      "type": "real"
+    },
+    {
+      "name": "me_theta",
+      "type": "real"
+    },
+    {
+      "name": "me_q_over_p",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "me_cov_off_diag_size",
+      "type": "int"
+    },
+    {
+      "name": "me_cov_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_0",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_1",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_2",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_3",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_4",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_5",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_6",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_7",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_8",
+      "type": "real"
+    },
+    {
+      "name": "me_cov_off_diag_9",
+      "type": "real"
+    }
+  ],
+  "outputs": [
+    "called",
+    "status",
+    "write_mask",
+    "pt",
+    "eta",
+    "phi",
+    "energy",
+    "charge",
+    "id_pt",
+    "me_pt",
+    "id_charge",
+    "me_charge",
+    "year_index",
+    "root_seed",
+    "g0",
+    "g1",
+    "g2",
+    "g3",
+    "g4",
+    "g_high_pt",
+    "raw_cb_gev",
+    "raw_id_gev",
+    "raw_me_gev",
+    "expected_percent_res_id",
+    "expected_percent_res_me",
+    "expected_res_id",
+    "expected_res_me",
+    "scale_smear_called",
+    "scale_cb_gev",
+    "scale_id_gev",
+    "scale_me_gev",
+    "scale_cb_recombined_gev",
+    "sagitta_called",
+    "sagitta_direct_cb_gev",
+    "sagitta_stat_comb_cb_gev",
+    "sagitta_id_gev",
+    "sagitta_me_gev",
+    "sagitta_rho",
+    "sagitta_stat_comb_status",
+    "pre_override_cb_gev"
+  ]
+}
