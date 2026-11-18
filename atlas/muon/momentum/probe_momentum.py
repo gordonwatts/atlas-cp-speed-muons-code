@@ -10,7 +10,7 @@ import numpy as np
 import typer
 
 
-def record_loaded_binaries(root, provider, destination):
+def record_loaded_binaries(fixture, provider, destination):
     fixed_names = {"libcorrectionlib.so", "libCore.so", "libHist.so", "libMathCore.so"}
     paths = set()
     for mapping in Path("/proc/self/maps").read_text(encoding="utf-8").splitlines():
@@ -31,7 +31,7 @@ def record_loaded_binaries(root, provider, destination):
         with path.open("rb") as binary:
             digests[str(path)] = hashlib.file_digest(binary, "sha256").hexdigest()
     with destination.open("x", encoding="utf-8") as target:
-        json.dump({"root_version": str(root.gROOT.GetVersion()), "loaded_binaries_sha256": digests}, target, indent=2)
+        json.dump({"release_rng_fixture": fixture, "loaded_binaries_sha256": digests}, target, indent=2)
         target.write("\n")
 
 
@@ -39,9 +39,9 @@ def main(
     provider: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
     payload: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
     trace_payload: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
+    release_rng_fixture: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
     runtime_provenance: Annotated[Path, typer.Option()],
 ):
-    import ROOT
     from correctionlib import _core, plugins
 
     plugins.load_library(provider.resolve())
@@ -108,10 +108,10 @@ def main(
     eta, phi = (float(np.float32(defaults[name])) for name in ("mu_eta", "mu_phi"))
     seed = int(1 + abs(phi) * 1e6 + abs(eta) * 1e3 + defaults["event_number_lo"])
     assert output(nominal, "root_seed") == seed
-    random = ROOT.TRandom3()
-    random.SetSeed(seed)
-    for field in ("g0", "g1", "g2", "g3", "g4", "g_high_pt"):
-        assert output(nominal, field) == random.Gaus(0, 1)
+    fixture = json.loads(release_rng_fixture.read_text(encoding="utf-8"))
+    assert fixture["seed"] == seed
+    for field, draw in zip(("g0", "g1", "g2", "g3", "g4", "g_high_pt"), fixture["gaussians"], strict=True):
+        assert output(nominal, field) == draw
 
     malformed = values(cb_valid=1, cb_cov_diag_size=3, cb_cov_off_diag_size=6)
     try:
@@ -138,7 +138,7 @@ def main(
     np.testing.assert_array_equal(diagnostic.evalv(*columns), checked)
     np.testing.assert_array_equal(definition.evalv(*columns), np.asarray(checked)[:, :production_count])
     assert diagnostic.evalv(columns[0], *(column[:0] for column in columns[1:])).shape == (0, len(fields))
-    record_loaded_binaries(ROOT, provider.resolve(), runtime_provenance)
+    record_loaded_binaries(fixture, provider.resolve(), runtime_provenance)
     print("29 states, original Gaussian draws, skip/write masks, track fallback and scalar/batch shapes passed")
 
 
