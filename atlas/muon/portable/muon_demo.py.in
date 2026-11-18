@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.14,<3.15"
+# @LOCAL_WHEEL_REQUIREMENTS@
+# ///
+"""Read the original PHYSLITE file and fill the 97-state muon pT histogram."""
+
+import os
+
+for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                 "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[variable] = "1"
+
+import hashlib
+from importlib.metadata import version
+import json
+from pathlib import Path
+import sys
+import time
+from typing import Annotated
+
+import atlas_muon_portable
+from atlas_muon_portable.packing import order, pack_momentum, pack_selection
+from atlas_muon_portable.raw_input import (
+    SELECTION_ROLES, VERTEX_PREFIX, MuonChunk, branch_plan, check_branches, flat, numpy, verify_file,
+)
+from atlas_muon_portable.runtime import record_runtime
+import awkward as ak
+import correctionlib
+from correctionlib import _core, plugins
+import hist
+import numpy as np
+import typer
+import uproot
+
+
+def main(
+    original: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Argument(dir_okay=False)],
+    repeat: Annotated[int, typer.Option("--repeat", "-n", min=1, help="Full original-file passes. Save the final pass.")] = 1,
+    stop: Annotated[int | None, typer.Option(min=0, help="Number of original entries from the start.")] = None,
+    chunk_size: Annotated[int, typer.Option(min=1)] = 2000,
+    runtime_record: Annotated[Path | None, typer.Option(dir_okay=False, help="Record native closure for an audit run.")] = None,
+):
+    if (sys.implementation.name, sys.version_info[:2]) != ("cpython", (3, 14)):
+        raise RuntimeError("This wheel requires CPython 3.14")
+    if output.exists() or (runtime_record is not None and (runtime_record.exists() or runtime_record.resolve() == output.resolve())):
+        raise FileExistsError("Choose fresh output and audit paths")
+
+    package = Path(atlas_muon_portable.__file__).resolve().parent
+    receipt = json.loads((package / "release.json").read_text(encoding="utf-8"))
+    if receipt["profile"] != "full" or version("correctionlib") != receipt["core"]["version"]:
+        raise RuntimeError("Install the paired full campaign and CorrectionLib wheels")
+    provider_path = package / "native" / "libatlas_muon.so"
+    payload_path = package / "payload.json"
+    workflow = json.loads((package / "workflow.json").read_text(encoding="utf-8"))
+    plugins.load_library(provider_path)
+    correction_set = _core.CorrectionSet.from_file(str(payload_path))
+    eta_selection = correction_set["muon_selection_eta"]
+    vertex_selection = correction_set["muon_selection_vertex"]
+    track_roles = correction_set["muon_selection_track_roles"]
+    momentum = correction_set["muon_momentum"]
+    working_point = correction_set["muon_selection_after_calibration"]
+    reconstruction = correction_set["muon_eff_reco"]
+    isolation = correction_set["muon_eff_iso"]
+    track_to_vertex = correction_set["muon_eff_ttva"]
+    combined_efficiency = correction_set["muon_eff_product"]
+    for name, contract in receipt["corrections"].items():
+        node = correction_set[name]
+        if node.output_size != contract["width"] or [v.name for v in node.inputs] != contract["inputs"]:
+            raise RuntimeError(f"Unexpected installed interface for {name}")
+
+    branches = branch_plan(workflow)
+    link_branches = {
+        "AnalysisMuonsAuxDyn." + item["branch"] for item in workflow["links"].values()
+    }
+    ordinary_branches = tuple(branch for branch in branches if branch not in link_branches)
+    states = workflow["states"]["all_ordered"]
+    kinematic_states = set(workflow["states"]["kinematic"])
+    weight_only = set(workflow["states"]["weight_only"])
+    efficiency_nodes = {"RECO": reconstruction, "ISO": isolation, "TTVA": track_to_vertex}
+    axes = (
+        hist.axis.Regular(100, 0., 500., name="pt_GeV", underflow=True, overflow=True),
+        hist.axis.StrCategory(states, name="systematic", growth=False, flow=False),
+    )
+
+    def fill_pass():
+        weighted = hist.Hist(*axes, storage=hist.storage.Weight())
+        unweighted = hist.Hist(*axes, storage=hist.storage.Int64())
+        events = muons = 0
+        cpu_start = time.process_time()
+        wall_start = time.perf_counter()
+        with uproot.open(
+            original, handler=uproot.source.file.MemmapSource, num_workers=1, use_threads=False,
+            decompression_executor=uproot.TrivialExecutor(), interpretation_executor=uproot.TrivialExecutor(),
+        ) as source:
+            tree = source["CollectionTree"]
+            verify_file(source, tree, workflow["source"])
+            check_branches(tree, branches, workflow["schema"])
+            last = tree.num_entries if stop is None else stop
+            if last > tree.num_entries:
+                raise ValueError("Entry range exceeds the original file")
+
+            # Each projected branch retains the source event boundaries. MuonChunk
+            # derives source indices and resolves each track inside its own event.
+            for arrays, report in tree.iterate(
+                expressions=ordinary_branches, entry_start=0, entry_stop=last, step_size=chunk_size,
+                library="ak", how=dict, report=True,
+            ):
+                # Split ElementLink parents must use the per-branch call so
+                # Uproot returns their event-jagged records.
+                arrays.update({
+                    branch: tree[branch].array(
+                        entry_start=report.tree_entry_start, entry_stop=report.tree_entry_stop, library="ak",
+                    ) for branch in sorted(link_branches)
+                })
+                if set(arrays) != set(branches):
+                    raise RuntimeError("The input projection omitted requested branches")
+                chunk = MuonChunk(arrays, report.tree_entry_start, workflow["links"])
+                events += len(chunk.counts)
+                muons += chunk.muon_size
+                pt_mev = chunk.muon("pt", np.float64)
+                eta = chunk.muon("eta", np.float64)
+                phi = chunk.muon("phi", np.float64)
+                charge = chunk.muon("charge", np.float64)
+                muon_type = chunk.muon("muonType", np.int64)
+                random_run = chunk.broadcast_event("RandomRunNumber", np.int64)
+                # All real input lanes carry exact promotions of the raw float
+                # branches. Event identity uses unsigned integers and two int64 limbs.
+                eta_bits = eta_selection.evalv(eta).astype(np.int64)
+                valid_links = {name: chunk.link(name).valid.astype(np.int64) for name in SELECTION_ROLES}
+                roles = track_roles.evalv(muon_type, *(valid_links[name] for name in SELECTION_ROLES))
+
+                vertex_type = arrays[VERTEX_PREFIX + "vertexType"]
+                vertex_z = arrays[VERTEX_PREFIX + "z"]
+                vertex_counts = numpy(ak.num(vertex_type, axis=1), np.int64)
+                if not np.array_equal(vertex_counts, numpy(ak.num(vertex_z, axis=1))):
+                    raise ValueError("Original vertex roles and coordinates disagree in shape")
+                valid_primary = vertex_selection.evalv(flat(vertex_type, np.int64)) == 1
+                first_primary = ak.firsts(vertex_z[ak.unflatten(valid_primary, vertex_counts)])
+                primary_z_mm = numpy(ak.fill_none(first_primary, 0.0), np.float64)
+
+                # Packing is local to this chunk and supplies raw track/covariance
+                # lanes. CorrectionLib controls the numerical calibration and gates.
+                momentum_input = pack_momentum(chunk, eta_bits, pt_mev, eta, phi, charge, muon_type, valid_links)
+                selection_input = pack_selection(chunk, eta_bits, muon_type, valid_links, roles, primary_z_mm, momentum_input)
+                kinematics = {}
+                efficiency_results = {}
+                for state in states:
+                    kin_state = state if state in kinematic_states else "NOSYS"
+                    if kin_state not in kinematics:
+                        m = momentum.evalv(*order(momentum, {**momentum_input, "systematic": kin_state}))
+                        called = momentum_input["called"] == 1
+                        if not np.array_equal(m[:, 0] == 1, called) or np.any(np.where(called, m[:, 1] != 2, m[:, 1] != -1)):
+                            raise RuntimeError(f"Momentum call or status mismatch in {kin_state}")
+                        masks = m[:, 2].astype(np.int64)
+                        chosen = working_point.evalv(*order(working_point, {
+                            **selection_input, "pt": m[:, 3], "eta": m[:, 4], "phi": m[:, 5],
+                            "id_pt": m[:, 8], "me_pt": m[:, 9],
+                            "calibrated_track_momenta_available": ((masks & 12) == 12).astype(np.int64),
+                        }))
+                        kinematics[kin_state] = m, chosen[:, 5].astype(np.int64)
+
+                    m, gate = kinematics[kin_state]
+                    owner = state.split("_", 3)[2] if state in weight_only else None
+                    factors = {}
+                    for label, node in efficiency_nodes.items():
+                        sf_state = state if owner == label else "NOSYS"
+                        key = label, kin_state, sf_state
+                        if key not in efficiency_results:
+                            sf = node.evalv(sf_state, random_run, m[:, 3], m[:, 4], m[:, 5], m[:, 7], muon_type, gate)
+                            bad = np.where(gate == 1, (sf[:, 1] != 1) & (sf[:, 1] != 2), sf[:, 1] != -1)
+                            if bad.any():
+                                raise RuntimeError(f"Efficiency call or status mismatch in {label} / {state}")
+                            efficiency_results[key] = sf[:, 0]
+                        factors[label] = efficiency_results[key]
+                    weights = combined_efficiency.evalv(factors["RECO"], factors["ISO"], factors["TTVA"])
+                    selected = gate == 1
+                    pt_gev = m[selected, 3] / 1000.
+                    weights = weights[selected]
+                    if not np.isfinite(pt_gev).all() or not np.isfinite(weights).all():
+                        raise ValueError(f"Non-finite selected histogram input in {state}")
+                    weighted.fill(pt_gev, state, weight=weights, threads=1)
+                    unweighted.fill(pt_gev, state, threads=1)
+            source_bytes = source.file.source.num_requested_bytes
+        wall_seconds = time.perf_counter() - wall_start
+        cpu_seconds = time.process_time() - cpu_start
+        return weighted, unweighted, {
+            "events": events, "muons": muons, "source_bytes_requested": source_bytes,
+            "input_processing_wall_seconds": wall_seconds, "input_processing_cpu_seconds": cpu_seconds,
+        }
+
+    pass_summaries = []
+    first_histogram_digest = None
+    for pass_index in range(repeat):
+        weighted, unweighted, processed = fill_pass()
+        result = weighted.view(flow=True)
+        counts = unweighted.view(flow=True)
+        digest = hashlib.sha256()
+        for column in (counts, result.value, result.variance):
+            digest.update(np.ascontiguousarray(column).tobytes())
+        histogram_digest = digest.hexdigest()
+        pass_summaries.append({
+            "pass": pass_index + 1, **processed, "histogram_sha256": histogram_digest,
+        })
+        if first_histogram_digest is None:
+            first_histogram_digest = histogram_digest
+        elif histogram_digest != first_histogram_digest:
+            raise RuntimeError("Repeated full-file passes gave different histogram content")
+
+    # The NPZ uses the same axes, weighted sums and integer counts as Path A.
+    # Repeated passes each get fresh histograms and only the final pass is saved.
+    with output.open("xb") as handle:
+        np.savez_compressed(
+            handle, states=np.asarray(states), pt_edges_GeV=weighted.axes[0].edges,
+            count=counts, sumw=result.value, sumw2=result.variance,
+        )
+    summary = {
+        "output": str(output.resolve()), "entries": int(counts.sum()), "passes": pass_summaries,
+        "events": pass_summaries[-1]["events"], "muons": pass_summaries[-1]["muons"],
+        "event_visits": sum(item["events"] for item in pass_summaries),
+        "muon_visits": sum(item["muons"] for item in pass_summaries),
+        "input_processing_wall_seconds": sum(item["input_processing_wall_seconds"] for item in pass_summaries),
+        "input_processing_cpu_seconds": sum(item["input_processing_cpu_seconds"] for item in pass_summaries),
+        "states": {
+            state: {"regular": int(counts[1:-1, i].sum()), "underflow": int(counts[0, i]), "overflow": int(counts[-1, i])}
+            for i, state in enumerate(states)
+        },
+    }
+    print(json.dumps(summary))
+    if runtime_record is not None:
+        record_runtime(runtime_record, atlas_muon_portable, correctionlib, _core, provider_path, payload_path)
+
+
+if __name__ == "__main__":
+    typer.run(main)

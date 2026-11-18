@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.14,<3.15"
+# @LOCAL_WHEEL_REQUIREMENTS@
+# ///
+"""Exercise the installed eta, vertex and efficiency corrections on real stored inputs."""
+
+import os
+
+for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "BLIS_NUM_THREADS"):
+    os.environ[variable] = "1"
+
+from importlib.metadata import version
+import json
+from pathlib import Path
+import sys
+from typing import Annotated
+
+import atlas_muon_portable
+from atlas_muon_portable.raw_input import EVENT_PREFIX, MUON_PREFIX, UINT32_MAX, VERTEX_PREFIX, MuonChunk, flat, verify_file
+from atlas_muon_portable.runtime import record_runtime
+import awkward as ak
+import correctionlib
+from correctionlib import _core, plugins
+import numpy as np
+import typer
+import uproot
+
+
+def main(
+    original: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Argument(dir_okay=False)],
+    entries: Annotated[int, typer.Option(min=1)] = 100,
+    runtime_record: Annotated[Path | None, typer.Option(dir_okay=False)] = None,
+):
+    if output.exists() or (runtime_record is not None and (runtime_record.exists() or runtime_record.resolve() == output.resolve())):
+        raise FileExistsError("Choose fresh output and audit paths")
+    if (sys.implementation.name, sys.version_info[:2]) != ("cpython", (3, 14)):
+        raise RuntimeError("This wheel requires CPython 3.14")
+    package = Path(atlas_muon_portable.__file__).resolve().parent
+    receipt = json.loads((package / "release.json").read_text(encoding="utf-8"))
+    if receipt["profile"] != "partial-selection-efficiency" or version("correctionlib") != receipt["core"]["version"]:
+        raise RuntimeError("Install the paired partial campaign and CorrectionLib wheels")
+    provider = package / "native" / "libatlas_muon.so"
+    payload = package / "payload.json"
+    plugins.load_library(provider)
+    corrections = _core.CorrectionSet.from_file(str(payload))
+    workflow = json.loads((package / "workflow.json").read_text(encoding="utf-8"))
+    branches = [MUON_PREFIX + field for field in ("pt", "eta", "phi", "charge", "muonType")]
+    branches += [EVENT_PREFIX + "RandomRunNumber", VERTEX_PREFIX + "vertexType"]
+    with uproot.open(
+        original, handler=uproot.source.file.MemmapSource, num_workers=1, use_threads=False,
+        decompression_executor=uproot.TrivialExecutor(), interpretation_executor=uproot.TrivialExecutor(),
+    ) as source:
+        tree = source["CollectionTree"]
+        verify_file(source, tree, workflow["source"])
+        if entries > tree.num_entries:
+            raise ValueError("Sample exceeds original entry count")
+        arrays = {name: ak.copy(values) for name, values in
+                  tree.arrays(branches, entry_stop=entries, library="ak", how=dict).items()}
+    chunk = MuonChunk(arrays, 0, {})
+    eta = chunk.muon("eta", np.float64)
+    eta_bits = corrections["muon_selection_eta"].evalv(eta)
+    vertices = corrections["muon_selection_vertex"].evalv(flat(arrays[VERTEX_PREFIX + "vertexType"], np.int64))
+
+    # The partial smoke probes efficiencies with stored pT and the eta gate.
+    # It never publishes a calibrated selection, weight histogram or result.
+    gate = (eta_bits == UINT32_MAX).astype(np.int64)
+    arguments = (
+        "NOSYS", chunk.broadcast_event("RandomRunNumber", np.int64), chunk.muon("pt", np.float64),
+        eta, chunk.muon("phi", np.float64), chunk.muon("charge", np.float64), chunk.muon("muonType", np.int64), gate,
+    )
+    sf = [
+        corrections[f"muon_eff_{name}"].evalv(*arguments)
+        for name in ("reco", "iso", "ttva")
+    ]
+    if not gate.any() or any(
+        not np.isin(item[gate == 1, 1], (1, 2)).all() or not np.all(item[gate == 0, 1] == -1) for item in sf
+    ):
+        raise RuntimeError("The partial probe did not exercise valid real-input efficiency calls")
+    product = corrections["muon_eff_product"].evalv(*(item[:, 0] for item in sf))
+    if not np.isfinite(product).all():
+        raise RuntimeError("Non-finite partial product")
+
+    summary = {
+        "scope": "partial-selection-efficiency-installed-loading-smoke",
+        "events": entries, "muons": chunk.muon_size, "source_uuid": workflow["source"]["uuid"],
+        "primary_vertices": int((vertices == 1).sum()), "eta_gate_passed": int(gate.sum()),
+        "efficiency_calls": int(3 * gate.sum()), "calibrated_workflow_executed": False,
+    }
+    with output.open("x", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2)
+        handle.write("\n")
+    print(json.dumps(summary))
+    if runtime_record is not None:
+        record_runtime(runtime_record, atlas_muon_portable, correctionlib, _core, provider, payload)
+
+
+if __name__ == "__main__":
+    typer.run(main)
