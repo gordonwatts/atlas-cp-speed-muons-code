@@ -7,7 +7,8 @@ out=${1:?fresh stock provider result path required}
 sdk=${2:?stock SDK venv path required}
 data=${3:?accepted parity fixtures path required}
 oracle=${4:?real release parity output required}
-src="$repo/atlas/muon"
+src=${5:-$repo/atlas/muon}
+compile_flags=${6:-}
 sdk_dir="$sdk/lib/python3.14/site-packages/correctionlib/cmake"
 externals="${AtlasArea/AnalysisBase\//AnalysisBaseExternals\/}/InstallArea/$CMTCONFIG"
 eigen=$(dirname "$(find "$externals" -iname Eigen3Config.cmake -print -quit)")
@@ -17,7 +18,7 @@ mkdir "$out"
 {
     /usr/bin/g++ --version
     "${clean[@]}" /usr/bin/cmake -S "$src" -B "$out/provider-build" -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS="$compile_flags" \
         -Dcorrectionlib_DIR="$sdk_dir" -DEigen3_DIR="$eigen" -DMUON_RAPIDJSON_INCLUDE_DIR="$repo/rapidjson/include" \
         -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON '-DCMAKE_INSTALL_RPATH=$ORIGIN/../../correctionlib/lib'
     "${clean[@]}" /usr/bin/cmake --build "$out/provider-build" --parallel 1 --target atlas_muon

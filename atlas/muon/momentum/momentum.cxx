@@ -18,9 +18,14 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <bit>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+
+#if defined(__x86_64__) && defined(__SSE2__)
+#include <xmmintrin.h>
+#endif
 
 namespace atlas::momentum {
 namespace {
@@ -463,6 +468,8 @@ Status prepare_stat_combination(const Covariance& id_cov, const Covariance& me_c
     return ok;
 }
 
+#include "stat_combination_cache.inc"
+
 void combine_stat_parameters(const Parameters& id, const Parameters& me, int charge,
                              const StatCombinationWeights& weights, Parameters& combined) {
     // Retain the source chi2 calculation for its numerical domain.
@@ -497,12 +504,13 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
 
     id_parameters[4] = std::abs(id_parameters[4]);
     me_parameters[4] = std::abs(me_parameters[4]);
-    StatCombinationWeights weights;
-    status = prepare_stat_combination(id.covariance, me.covariance, weights);
+    PreparedStatCombination local;
+    const auto& prepared = cached_stat_combination(id.covariance, me.covariance, 0, local);
+    status = prepared.status;
     if (status != ok) return cb.pt;
 
     Parameters cb_nominal;
-    combine_stat_parameters(id_parameters, me_parameters, cb.charge, weights, cb_nominal);
+    combine_stat_parameters(id_parameters, me_parameters, cb.charge, prepared.weights, cb_nominal);
 
     id_parameters[4] = inverse_momentum(id_corrected);
     me_parameters[4] = inverse_momentum(me_corrected);
@@ -510,7 +518,7 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
     id_parameters[4] = std::abs(id_parameters[4]);
     me_parameters[4] = std::abs(me_parameters[4]);
     Parameters cb_corrected;
-    combine_stat_parameters(id_parameters, me_parameters, cb.charge, weights, cb_corrected);
+    combine_stat_parameters(id_parameters, me_parameters, cb.charge, prepared.weights, cb_corrected);
 
     const double pt_nominal = std::sin(cb_nominal[3]) / std::abs(cb_nominal[4]);
     const double pt_corrected = std::sin(cb_corrected[3]) / std::abs(cb_corrected[4]);
@@ -712,6 +720,31 @@ private:
 
 } // namespace
 } // namespace atlas::momentum
+
+
+#ifdef ATLAS_MUON_M05_STATS
+// Test-only exports. Operate on the calling thread's cache and counts.
+extern "C" void atlas_muon_m05_covariance_counts(std::uint64_t* output) {
+    for (const auto& phase : atlas::momentum::covariance_counts) {
+        output = std::copy(phase.begin(), phase.end(), output);
+    }
+}
+
+extern "C" void atlas_muon_m05_covariance_reset() {
+    for (auto& set : atlas::momentum::covariance_cache) {
+        set.next = 0;
+        for (auto& entry : set.entries) entry.phase = atlas::momentum::empty_covariance_phase;
+    }
+    atlas::momentum::covariance_counts = {};
+}
+
+extern "C" void atlas_muon_m05_covariance_layout(std::size_t* output) {
+    output[0] = sizeof(atlas::momentum::covariance_cache);
+    output[1] = atlas::momentum::covariance_cache_sets;
+    output[2] = atlas::momentum::covariance_cache_ways;
+    output[3] = sizeof(atlas::momentum::covariance_counts);
+}
+#endif
 
 void register_momentum(correction::PluginRegistry& registry) {
     static_assert(correction::plugin_api_version == 4);

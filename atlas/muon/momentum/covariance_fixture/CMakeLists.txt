@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.20)
+project(atlas_muon_m05_fixture LANGUAGES CXX)
+
+find_package(correctionlib CONFIG REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+find_path(MUON_RAPIDJSON_INCLUDE_DIR rapidjson/document.h REQUIRED)
+option(M05_LINK_ROOT "Link the archived pre-R01 momentum source to release ROOT" OFF)
+
+add_executable(m05_fixture cache_fixture.cxx "${MOMENTUM_SOURCE}/momentum_payload.cxx")
+target_compile_features(m05_fixture PRIVATE cxx_std_20)
+target_compile_definitions(m05_fixture PRIVATE M05_SOURCE="${MOMENTUM_SOURCE}/momentum.cxx" ATLAS_MUON_M05_STATS)
+target_include_directories(m05_fixture SYSTEM PRIVATE "${MUON_RAPIDJSON_INCLUDE_DIR}")
+target_link_libraries(m05_fixture PRIVATE correctionlib Eigen3::Eigen Threads::Threads)
+if(M05_LINK_ROOT)
+    find_package(ROOT 6.40.02 EXACT CONFIG REQUIRED COMPONENTS Core Hist MathCore)
+    target_link_libraries(m05_fixture PRIVATE ROOT::Core ROOT::Hist ROOT::MathCore)
+endif()

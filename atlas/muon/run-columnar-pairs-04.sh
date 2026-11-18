@@ -9,5 +9,10 @@ control=${3:?accepted uninstrumented control required}
 candidate=${4:?uninstrumented candidate required}
 payload=${5:?accepted shared production payload required}
 expected=${6:?accepted output histogram required}
-exec env -u PYTHONPATH -u PYTHONHOME "$sdk/bin/python" "$repo/atlas/muon/benchmark_columnar_pairs.py" \
+runtime=(env -u PYTHONPATH -u PYTHONHOME)
+if [[ ${7:-release} == stock ]]; then
+    runtime+=(-u LD_LIBRARY_PATH -u LD_PRELOAD -u ROOTSYS -u ROOT_INCLUDE_PATH -u CMAKE_PREFIX_PATH
+              -u ATLAS_LOCAL_ROOT_BASE -u VIRTUAL_ENV PYTHONNOUSERSITE=1)
+fi
+exec "${runtime[@]}" "$sdk/bin/python" "$repo/atlas/muon/benchmark_columnar_pairs.py" \
     "$destination" "$INPUT" "$control" "$candidate" "$payload" "$expected"
