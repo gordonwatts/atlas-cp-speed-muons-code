@@ -1,0 +1,7 @@
+CommonServices:
+  runSystematics: false
+  systematicsHistogram: systematicsList
+
+Output:
+  vars:
+    - AnalysisMuons.pt -> mu_pt_NOSYS

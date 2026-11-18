@@ -7,12 +7,13 @@ smoke_id=${1:?fresh test label required}
 export MUON_MOMENTUM_SCHEME=${2:?momentum scheme required}
 export MUON_ETA_SAGITTA=${3:?eta split 0 or 1 required}
 export MUON_VALIDATION_OUTPUT=${4:-0}
+event_count=${5:-100}
 mkdir "$RESULTS/$smoke_id"
 cd "$RESULTS/$smoke_id"
-printf 'MUON_MOMENTUM_SCHEME=%s MUON_ETA_SAGITTA=%s MUON_VALIDATION_OUTPUT=%s\n' "$MUON_MOMENTUM_SCHEME" "$MUON_ETA_SAGITTA" "$MUON_VALIDATION_OUTPUT" > command.txt
-printf '%q ' python "$reference_dir/run_reference.py" --direct-driver --dump-full-config -i "$INPUT" -t "$reference_dir/smoke.yaml" -o reference -e 100 >> command.txt
+printf 'MUON_MOMENTUM_SCHEME=%s MUON_ETA_SAGITTA=%s MUON_VALIDATION_OUTPUT=%s MUON_STATUS_OBSERVER_LIBRARY=%s\n' "$MUON_MOMENTUM_SCHEME" "$MUON_ETA_SAGITTA" "$MUON_VALIDATION_OUTPUT" "${MUON_STATUS_OBSERVER_LIBRARY:-}" > command.txt
+printf '%q ' python "$reference_dir/run_reference.py" --direct-driver --dump-full-config -i "$INPUT" -t "$reference_dir/smoke.yaml" -o reference -e "$event_count" >> command.txt
 printf '\n' >> command.txt
-python "$reference_dir/run_reference.py" --direct-driver --dump-full-config -i "$INPUT" -t "$reference_dir/smoke.yaml" -o reference -e 100 > job.log 2>&1 &
+python "$reference_dir/run_reference.py" --direct-driver --dump-full-config -i "$INPUT" -t "$reference_dir/smoke.yaml" -o reference -e "$event_count" > job.log 2>&1 &
 worker=$!
 touch loaded-libraries-samples.txt
 {

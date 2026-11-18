@@ -70,6 +70,8 @@ def audit(input_path, smoke_dir, comparison_dir=None):
     comparison_values = 0
     nominal_status_values = {}
     identity_sha256 = hashlib.sha256()
+    efficiency_stages = ("reco", "isol", "TTVA")
+    has_status_observer = "mu_detail_reco_sf_status_NOSYS" in branch_names
     selected_by_state = Counter()
     zero_events = []
     first = None
@@ -122,6 +124,13 @@ def audit(input_path, smoke_dir, comparison_dir=None):
                     validity for eta, validity in zip(gate_arrays[0], arrays[f"mu_detail_calibration_valid_{state}"], strict=True) if eta == 0xFFFFFFFF
                 )
             weights = [arrays.get(f"{prefix}_{state}", arrays[f"{prefix}_NOSYS"]) for prefix in prefixes[-3:]]
+            if has_status_observer:
+                for stage, sf in zip(efficiency_stages, weights, strict=True):
+                    status = f"mu_detail_{stage}_sf_status"
+                    own = f"{status}_{state}"
+                    codes = arrays.get(own, arrays[f"{status}_NOSYS"])
+                    assert all(code in (1, 2) if selected else code == -1 and value == -1. for code, selected, value in zip(codes, selector, sf, strict=True)), (entry, stage, state)
+                    category.setdefault("efficiency_status", {}).setdefault(stage, Counter()).update(codes)
             for expected, reco, isolation, ttva in zip(arrays[f"mu_effSF_medium_{state}"], *weights, strict=True):
                 rounded = struct.unpack("!f", struct.pack("!f", reco * isolation))[0]
                 assert expected == struct.unpack("!f", struct.pack("!f", rounded * ttva))[0], (entry, state)
@@ -168,6 +177,7 @@ if __name__ == "__main__":
     print("Nominal selected:", evidence["nominal_selected"])
     print("Upstream branch comparison:", evidence["comparison"])
     print("Observed nominal decorations:", evidence["nominal_status_values"])
+    print("Observed nominal efficiency status:", evidence["states"]["categories"]["NOSYS"].get("efficiency_status"))
     print("Kinematic states:", evidence["states"]["kinematic"])
     print("Weight-only basenames:", sorted({re.sub(r"__1(?:up|down)$", "", state) for state in evidence["states"]["weight_only"]}))
     print("Response counts:", evidence["states"]["number_with_any_changed_product"])
