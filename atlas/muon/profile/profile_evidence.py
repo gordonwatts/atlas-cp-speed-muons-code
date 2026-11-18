@@ -178,7 +178,9 @@ def placement(directory, entrypoint, collector_cpu, sampled, allow_transient_for
     perf_path = directory.parent / "probe" / "perf.path"
     collector_name = Path(perf_path.read_text().strip()).resolve().name if perf_path.exists() else "perf"
     for line in (directory / "processes.jsonl").read_text().splitlines():
-        for process in json.loads(line)["processes"]:
+        snapshot = json.loads(line)
+        for process in snapshot["processes"]:
+            process["wall_time_unix_ns"] = snapshot["wall_time_unix_ns"]
             executable = Path(process["executable"]).name
             if executable.startswith("python") and any(
                 (Path(process["cwd"]) / token).resolve() == entrypoint
@@ -216,14 +218,31 @@ def placement(directory, entrypoint, collector_cpu, sampled, allow_transient_for
     collector_affinity = {
         key: sorted({row["affinity"] for row in values}) for key, values in collectors.items()
     }
-    if sampled and (len(collector_affinity) != 1 or list(collector_affinity.values()) != [[str(collector_cpu)]]):
-        raise ValueError(f"{directory} does not have one observed perf collector pinned to CPU {collector_cpu}")
+    collector_startup = []
+    if sampled:
+        first_owner_observation = records[0]["wall_time_unix_ns"]
+        if len(collectors) != 1:
+            raise ValueError(f"{directory} does not have one observed persistent perf collector")
+        (collector_pid, collector_records), = collectors.items()
+        pinned_with_owner = False
+        for row in collector_records:
+            before_owner = row["wall_time_unix_ns"] < first_owner_observation
+            if row["affinity"] == str(collector_cpu):
+                pinned_with_owner |= not before_owner
+            elif before_owner:
+                collector_startup.append({"pid": collector_pid, "affinity": row["affinity"],
+                                          "threads": row["threads"], "wall_time_unix_ns": row["wall_time_unix_ns"]})
+            else:
+                raise ValueError(f"{directory} perf collector left CPU {collector_cpu} during analysis")
+        if not pinned_with_owner:
+            raise ValueError(f"{directory} does not observe the perf collector pinned during analysis")
     return {
         "pid": pid, "rows_observed": len(records), "affinity": cpus,
         "threads": threads, "binary": file_identity(records[0]["executable"]),
         "argv": records[0]["argv"], "perf_collector_affinity": collector_affinity,
         "transient_same_image_forks": transient_forks,
         "transient_same_image_perf_forks": perf_forks,
+        "perf_collector_startup_other_affinity": collector_startup,
     }
 
 
@@ -496,6 +515,9 @@ def analyze(
         fields = ("measured_wall_seconds", "input_processing_wall_seconds", "input_processing_cpu_seconds")
         evidence["sampled_to_control_ratios"] = {name: sampled[name] / control[name] for name in fields}
         evidence["profile"] = sampled_profile(directory / "sampled", sampled["placement"]["pid"], result, top_symbols)
+        if (sampled["placement"]["perf_collector_startup_other_affinity"]
+                and evidence["profile"]["python_owner_samples"] != evidence["profile"]["samples"]):
+            raise ValueError("Unexpected sample owners with an off-CPU collector startup observation")
         evidence["minimum_met"] = sampled["input_processing_wall_seconds"] >= minimum_seconds
     json_new(result / "evidence.json", evidence)
     if sampled and not evidence["minimum_met"]:
