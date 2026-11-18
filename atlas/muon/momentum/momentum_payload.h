@@ -1,7 +1,5 @@
 #pragma once
 
-#include <TAxis.h>
-
 #include <array>
 #include <map>
 #include <optional>
@@ -32,7 +30,10 @@ struct State {
 };
 
 struct Axis {
-    TAxis axis;
+    int bins = 0;
+    double minimum = 0;
+    double maximum = 0;
+    std::vector<double> edges;
     double lower = 0;
     double upper = 0;
 

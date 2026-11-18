@@ -1,4 +1,5 @@
 #include "momentum_payload.h"
+#include "root_compat.h"
 
 #include "correction_plugin.h"
 
@@ -58,19 +59,18 @@ Axis axis_from_json(const Json& value) {
     check(std::isfinite(low) && std::isfinite(high) && low < high, "Invalid momentum calibration axis bounds");
     check(value[3].IsArray(), "Invalid momentum calibration axis edges");
     Axis result;
-    if (value[3].Empty()) {
-        result.axis.Set(count, low, high);
-    } else {
+    result.bins = count;
+    result.minimum = low;
+    result.maximum = high;
+    if (!value[3].Empty()) {
         check_size(value[3], static_cast<std::size_t>(count) + 1);
-        std::vector<double> edges;
         for (const auto& entry : value[3].GetArray()) {
             const double edge = binary64(entry);
-            check(std::isfinite(edge) && (edges.empty() || edges.back() < edge),
+            check(std::isfinite(edge) && (result.edges.empty() || result.edges.back() < edge),
                   "Invalid momentum calibration axis edge");
-            edges.push_back(edge);
+            result.edges.push_back(edge);
         }
-        check(edges.front() == low && edges.back() == high, "Inconsistent axis bounds");
-        result.axis.Set(count, edges.data());
+        check(result.edges.front() == low && result.edges.back() == high, "Inconsistent axis bounds");
     }
     constexpr auto epsilon = std::numeric_limits<double>::epsilon();
     result.lower = low + epsilon;
@@ -81,8 +81,8 @@ Axis axis_from_json(const Json& value) {
 Histogram histogram_from_json(const Json& value) {
     check_size(value, 3);
     Histogram result{axis_from_json(value[0]), axis_from_json(value[1]), {}};
-    const auto nx = static_cast<std::size_t>(result.eta.axis.GetNbins()) + 2;
-    const auto ny = static_cast<std::size_t>(result.phi.axis.GetNbins()) + 2;
+    const auto nx = static_cast<std::size_t>(result.eta.bins) + 2;
+    const auto ny = static_cast<std::size_t>(result.phi.bins) + 2;
     check_size(value[2], nx * ny);
     result.content.reserve(nx * ny);
     for (const auto& cell : value[2].GetArray()) result.content.push_back(binary64(cell));
@@ -141,14 +141,14 @@ State read_state(const Json& value) {
 
 // CalibContainer uses these precise epsilon operations and ROOT's FindFixBin.
 int Axis::coordinate_bin(double coordinate) const {
-    return axis.FindFixBin(std::max(std::min(coordinate, upper), lower));
+    const double bounded = std::max(std::min(coordinate, upper), lower);
+    return root_compat::axis_find_fix_bin(bounded, bins, minimum, maximum, edges);
 }
 
 double Histogram::lookup(double track_eta, double track_phi) const {
     const int x = eta.coordinate_bin(track_eta);
     const int y = phi.coordinate_bin(track_phi);
-    const auto nx = static_cast<std::size_t>(eta.axis.GetNbins()) + 2;
-    return content.at(static_cast<std::size_t>(x) + nx * static_cast<std::size_t>(y));
+    return content.at(root_compat::th2_global_bin(x, y, eta.bins, phi.bins));
 }
 
 double PeriodMaps::scale_value(Detector detector, ScaleParameter parameter, ScaleVariant variant,

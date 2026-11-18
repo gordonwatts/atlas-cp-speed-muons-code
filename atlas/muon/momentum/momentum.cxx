@@ -5,12 +5,11 @@
  */
 #include "momentum.h"
 #include "momentum_payload.h"
+#include "root_compat.h"
 
 #include "correction_plugin.h"
 
 #include <Eigen/LU>
-#include <Math/Vector4D.h>
-#include <TRandom3.h>
 
 #include <algorithm>
 #include <array>
@@ -30,8 +29,6 @@ using Value = correction::Variable::Type;
 using ValueType = correction::Variable::VarType;
 using Parameters = Eigen::Matrix<double, 5, 1, 0, 5, 1>;
 using Covariance = Eigen::Matrix<double, 5, 5, 0, 5, 5>;
-using AngularVector = ROOT::Math::LorentzVector<ROOT::Math::PtEtaPhiM4D<double>>;
-using CartesianVector = ROOT::Math::LorentzVector<ROOT::Math::PxPyPzM4D<double>>;
 
 constexpr auto gev_to_mev = 1e3;
 constexpr auto mev_to_gev = 1e-3;
@@ -77,7 +74,6 @@ constexpr std::array track_names{
 struct Track {
     double raw_pt = 0;
     double pt = 0;
-    double mass = 0;
     int raw_charge = 0;
     int charge = 0;
     Parameters parameters = Parameters::Zero();
@@ -119,11 +115,7 @@ thread_local GaussianCacheCounts rng_cache_counts{};
 #endif
 
 GaussianDraws draw_gaussians(std::uint32_t seed) {
-    TRandom3 random;
-    random.SetSeed(seed);
-    GaussianDraws draws;
-    for (double& draw : draws) draw = random.Gaus(0, 1);
-    return draws;
+    return root_compat::gaussians(seed);
 }
 
 GaussianDraws gaussians_for_seed(std::uint32_t seed) {
@@ -131,7 +123,7 @@ GaussianDraws gaussians_for_seed(std::uint32_t seed) {
 #ifdef ATLAS_MUON_M01_STATS
         ++rng_cache_counts.zero_bypasses;
 #endif
-        // ROOT uses its entropy path for zero.
+        // A zero key bypasses reuse and is rejected by the nonzero-seed implementation.
         return draw_gaussians(seed);
     }
 
@@ -221,8 +213,7 @@ double track_pt(float q_over_p, float theta, float phi) {
     const float sin_theta = std::sin(theta);
     const float px = p * sin_theta * std::cos(phi);
     const float py = p * sin_theta * std::sin(phi);
-    const float pz = p * std::cos(theta);
-    return CartesianVector{px, py, pz, muon_mass_mev}.pt();
+    return root_compat::cartesian_pt(px, py);
 }
 
 double expected_resolution(const PeriodMaps& maps, const Muon& mu, Detector detector, bool add_mc_smearing) {
@@ -497,11 +488,12 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
     Parameters id_parameters = id.parameters;
     Parameters me_parameters = me.parameters;
 
-    AngularVector tlv{id.pt, mu.eta, mu.phi, id.mass};
-    auto inverse_momentum = [&]() { return tlv.P() == 0 ? 1e12 : 1.0 / (tlv.P() * 1e3); };
-    id_parameters[4] = inverse_momentum();
-    tlv.SetCoordinates(me.pt, mu.eta, mu.phi, me.mass);
-    me_parameters[4] = inverse_momentum();
+    const auto inverse_momentum = [&](double pt) {
+        const double p = root_compat::angular_momentum(pt, mu.eta);
+        return p == 0 ? 1e12 : 1.0 / (p * 1e3);
+    };
+    id_parameters[4] = inverse_momentum(id.pt);
+    me_parameters[4] = inverse_momentum(me.pt);
 
     id_parameters[4] = std::abs(id_parameters[4]);
     me_parameters[4] = std::abs(me_parameters[4]);
@@ -512,10 +504,8 @@ double stat_combination(const Muon& mu, double id_corrected, double me_corrected
     Parameters cb_nominal;
     combine_stat_parameters(id_parameters, me_parameters, cb.charge, weights, cb_nominal);
 
-    tlv.SetCoordinates(id_corrected, mu.eta, mu.phi, id.mass);
-    id_parameters[4] = inverse_momentum();
-    tlv.SetCoordinates(me_corrected, mu.eta, mu.phi, me.mass);
-    me_parameters[4] = inverse_momentum();
+    id_parameters[4] = inverse_momentum(id_corrected);
+    me_parameters[4] = inverse_momentum(me_corrected);
 
     id_parameters[4] = std::abs(id_parameters[4]);
     me_parameters[4] = std::abs(me_parameters[4]);
@@ -655,7 +645,6 @@ private:
                 const auto theta = real(start + theta_in);
                 const auto q_over_p = real(start + qp_in);
                 track.parameters << real(start + d0_in), real(start + z0_in), phi, theta, q_over_p;
-                track.mass = muon_mass_mev;
                 track.raw_pt = track.pt = track_pt(q_over_p, theta, phi) * mev_to_gev;
                 std::array<float, 5> diag;
                 std::array<float, 10> off;
@@ -669,7 +658,7 @@ private:
             result[raw_id_out] = mu.tracks[ID].raw_pt;
             result[raw_me_out] = mu.tracks[ME].raw_pt;
 
-            const UInt_t seed = 1 + std::abs(mu.phi) * 1E6 + std::abs(mu.eta) * 1E3 + event;
+            const auto seed = root_compat::muon_seed(mu.phi, mu.eta, event);
             mu.gaussian = gaussians_for_seed(seed);
             result[seed_out] = seed;
             for (std::size_t i = 0; i < mu.gaussian.size(); ++i) {
@@ -713,7 +702,7 @@ private:
             result[status_out] = ok;
         }
 
-        result[energy_out] = AngularVector{result[pt_out], result[eta_out], result[phi_out], muon_mass_mev}.E();
+        result[energy_out] = root_compat::positive_mass_energy(result[pt_out], result[eta_out], muon_mass_mev);
     }
 
     const Payload payload_;
@@ -757,7 +746,11 @@ extern "C" std::size_t atlas_muon_m01_rng_cache_bytes() {
 }
 
 extern "C" void atlas_muon_m01_rng_probe_seed(std::uint32_t seed, double* output) {
-    const auto draws = atlas::momentum::gaussians_for_seed(seed);
-    std::copy(draws.begin(), draws.end(), output);
+    try {
+        const auto draws = atlas::momentum::gaussians_for_seed(seed);
+        std::copy(draws.begin(), draws.end(), output);
+    } catch (const std::domain_error&) {
+        std::fill_n(output, 6, std::numeric_limits<double>::quiet_NaN());
+    }
 }
 #endif

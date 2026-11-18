@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+project(atlas_muon_root_free_probe LANGUAGES CXX)
+
+option(ATLAS_R01_BUILD_ROOT_ORACLE "Build the comparison executable linked to release ROOT" OFF)
+set(ATLAS_R01_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Path to the actual provider compatibility header")
+add_executable(r01_standalone parity_probe.cxx)
+target_include_directories(r01_standalone PRIVATE "${ATLAS_R01_HEADER_DIR}")
+target_compile_features(r01_standalone PRIVATE cxx_std_23)
+
+if(ATLAS_R01_BUILD_ROOT_ORACLE)
+    find_package(ROOT 6.40.02 EXACT CONFIG REQUIRED COMPONENTS Core Hist MathCore)
+    add_executable(r01_release_root parity_probe.cxx)
+    target_include_directories(r01_release_root PRIVATE "${ATLAS_R01_HEADER_DIR}")
+    target_compile_features(r01_release_root PRIVATE cxx_std_23)
+    target_compile_definitions(r01_release_root PRIVATE ATLAS_R01_ROOT_ORACLE)
+    target_link_libraries(r01_release_root PRIVATE ROOT::Core ROOT::Hist ROOT::MathCore)
+endif()
