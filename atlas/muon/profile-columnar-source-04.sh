@@ -12,7 +12,12 @@ mode=${6:-C}
 bridge=${7:-}
 mkdir "$out"
 source_dir="$repo/atlas/muon"
-python=(env -u PYTHONHOME -u PYTHONPATH "$sdk/bin/python")
+runtime=(env -u PYTHONHOME -u PYTHONPATH)
+if [[ "$mode" == stock ]]; then
+    runtime+=(-u LD_LIBRARY_PATH -u LD_PRELOAD -u ROOTSYS -u ROOT_INCLUDE_PATH -u CMAKE_PREFIX_PATH
+              -u ATLAS_LOCAL_ROOT_BASE -u VIRTUAL_ENV PYTHONNOUSERSITE=1)
+fi
+python=("${runtime[@]}" "$sdk/bin/python")
 if [[ "$mode" == B ]]; then
     [[ -f "$bridge" ]]
     framework=(env ATLAS_MUON_FRAMEWORK_BRIDGE="$bridge" ATLAS_MUON_PROVIDER="$provider"
@@ -21,7 +26,7 @@ if [[ "$mode" == B ]]; then
         "$(command -v python)" "$source_dir/framework/bridge_entry.py"
         --direct-driver -i "$INPUT" -t "$repo/tools/muon_reference/smoke.yaml" -o reference -e 20000)
 else
-    [[ "$mode" == C ]]
+    [[ "$mode" == C || "$mode" == stock ]]
 fi
 capability=unavailable
 {
@@ -92,6 +97,6 @@ if [[ "$capability" == available ]]; then
 else
     echo "Native software clock unavailable; no sample shares produced" > "$out/limitation.txt"
 fi
-if [[ "$mode" == C ]]; then
-    bash "$source_dir/run-c-phases-03.sh" "$out/phases" "$sdk" "$provider" "$payload" "$expected"
+if [[ "$mode" != B ]]; then
+    bash "$source_dir/run-c-phases-03.sh" "$out/phases" "$sdk" "$provider" "$payload" "$expected" "$mode"
 fi
