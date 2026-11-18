@@ -42,16 +42,21 @@ def summarize(rows, field):
 
 def main(
     destination: Path, original: Path, control: Path, candidate: Path, payload: Path, expected: Path,
+    candidate_runner: Path | None = None,
 ):
     for artifact in (original, control, candidate, payload, expected):
         if not artifact.is_file():
             raise typer.BadParameter(f"Missing artifact: {artifact}")
     destination.mkdir()
     runner = Path(__file__).with_name("columnar") / "run_muons.py"
+    runners = {"control": runner, "candidate": candidate_runner or runner}
+    runner_hashes = {variant: {name: digest(path.with_name(name)) for name in (
+        path.name, "raw_input.py", "muon_analysis.py", "outputs.py", "workflow.json"
+    )} for variant, path in runners.items()}
     libraries = {"control": control, "candidate": candidate}
     library_hashes = {variant: digest(path) for variant, path in libraries.items()}
-    if library_hashes["control"] == library_hashes["candidate"]:
-        raise ValueError("Paired production variants loaded the same binary")
+    if library_hashes["control"] == library_hashes["candidate"] and runner_hashes["control"] == runner_hashes["candidate"]:
+        raise ValueError("Paired production variants use the same binary and driver sources")
     expected_hash = digest(expected)
     environment = dict(os.environ)
     runtime = Path(sys.executable).resolve()
@@ -64,7 +69,7 @@ def main(
             directory.mkdir()
             histogram = directory / "histogram.npz"
             command = [
-                sys.executable, str(runner), "histogram", str(original), str(histogram),
+                sys.executable, str(runners[variant]), "histogram", str(original), str(histogram),
                 "--mode", "full", "--provider", str(libraries[variant]),
                 "--momentum", str(payload), "--selection", str(payload), "--efficiency", str(payload),
                 "--chunk-size", "2000",
@@ -105,7 +110,9 @@ def main(
         "shared_payload_sha256": digest(payload), "accepted_histogram_sha256": expected_hash,
         "installed_python": sys.executable, "base_python": str(runtime),
         "provider_paths": {variant: str(path) for variant, path in libraries.items()},
-        "provider_sha256": library_hashes, "wall": wall, "cpu": cpu, "pairs": rows,
+        "provider_sha256": library_hashes, "runner_sha256": runner_hashes,
+        "runner_paths": {variant: str(path) for variant, path in runners.items()},
+        "wall": wall, "cpu": cpu, "pairs": rows,
     }
     (destination / "benchmark.json").write_text(json.dumps(report, indent=2) + "\n")
 
