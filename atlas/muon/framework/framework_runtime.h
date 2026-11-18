@@ -16,7 +16,10 @@ using Values = std::vector<correction::Variable::Type>;
 
 enum class Entry {
     eta, pt, momentum_state, momentum, energy, track, quality,
-    isolation, reco, iso, ttva, product, final, count
+    isolation, reco, iso, ttva, product, final,
+    momentum_state_init, momentum_state_cache_enabled, momentum_state_release_calls,
+    momentum_state_release_failures, momentum_state_catalog, momentum_state_filters,
+    momentum_state_filter_failures, momentum_state_cache_hits, count
 };
 
 void record_dispatch(Entry entry);

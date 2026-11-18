@@ -12,6 +12,7 @@ MOMENTUM = "libMuonMomentumCorrectionsLib.so"
 EFFICIENCY = "libMuonEfficiencyCorrectionsLib.so"
 SYMBOLS = {
     "pt_eta_accept": (ASG, "CP::AsgPtEtaSelectionTool::accept(xAOD::IParticle const*) const"),
+    "momentum_initialize": (MOMENTUM, "CP::MuonCalibTool::initialize()"),
     "momentum_apply_state": (MOMENTUM, "CP::MuonCalibTool::applySystematicVariation(CP::SystematicSet const&)"),
     "momentum_apply": (MOMENTUM, "CP::MuonCalibTool::applyCorrection(xAOD::Muon_v1&) const"),
     "efficiency_get": (

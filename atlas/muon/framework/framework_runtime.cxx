@@ -27,7 +27,10 @@ constexpr uint32_t pt_write = 1, charge_write = 2, id_pt_write = 4, me_pt_write 
 
 constexpr std::array<std::string_view, static_cast<size_t>(Entry::count)> entry_names{
     "eta", "pt", "momentum_state", "momentum", "energy", "track", "quality", "isolation",
-    "reco", "iso", "ttva", "product", "final"
+    "reco", "iso", "ttva", "product", "final",
+    "momentum_state_init", "momentum_state_cache_enabled", "momentum_state_release_calls",
+    "momentum_state_release_failures", "momentum_state_catalog", "momentum_state_filters",
+    "momentum_state_filter_failures", "momentum_state_cache_hits"
 };
 
 std::string absolute_file(const char* option) {
@@ -178,7 +181,11 @@ CP::CorrectionCode code(double value) {
 }
 
 void record_dispatch(Entry entry) {
-    static const bool enabled = std::getenv("ATLAS_MUON_DISPATCH_AUDIT") != nullptr;
+    static const bool enabled = std::getenv("ATLAS_MUON_DISPATCH_AUDIT") != nullptr
+#ifdef ATLAS_MUON_B_ALIAS_PROBE
+        || std::getenv("ATLAS_MUON_B_ALIAS_COUNTS") != nullptr
+#endif
+        ;
     if (enabled) {
         static DispatchAudit audit;
         ++audit.calls.at(static_cast<size_t>(entry));

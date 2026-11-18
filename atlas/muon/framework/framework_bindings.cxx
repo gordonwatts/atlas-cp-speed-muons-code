@@ -15,9 +15,12 @@
 #include <SelectionHelpers/SelectionHelpers.h>
 
 #include <dlfcn.h>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -49,8 +52,36 @@ constexpr std::array routes{
                     "TTVA", "muon_eff_ttva", Entry::ttva}
 };
 
-// CP's tool state is applied and consumed in order on the same analysis thread.
-thread_local std::unordered_map<const CP::MuonCalibTool*, std::string> momentum_states;
+struct SameSystematicMembers {
+    bool operator()(const CP::SystematicSet& first, const CP::SystematicSet& second) const {
+        // The release's SystematicSet operator== compares the dash-joined names.
+        return std::equal(first.begin(), first.end(), second.begin(), second.end(),
+                          [](const auto& a, const auto& b) { return a.name() == b.name(); });
+    }
+};
+
+struct MomentumAliases {
+    bool stock_configuration = false;
+    std::optional<CP::SystematicSet> affecting;
+    std::unordered_map<CP::SystematicSet, std::string, std::hash<CP::SystematicSet>,
+                       SameSystematicMembers> aliases;
+    std::optional<std::string> current;
+};
+
+// AnalysisBase owns each entry through AsgComponent::addCleanup. The frozen
+// runner initializes, sets and consumes the CP state on one analysis thread.
+thread_local std::unordered_map<const CP::MuonCalibTool*, std::weak_ptr<MomentumAliases>> momentum_states;
+
+std::shared_ptr<MomentumAliases> momentum_aliases(const CP::MuonCalibTool* tool) {
+    const auto found = momentum_states.find(tool);
+    return found == momentum_states.end() ? nullptr : found->second.lock();
+}
+
+inline void trace_alias([[maybe_unused]] Entry entry) {
+#ifdef ATLAS_MUON_B_ALIAS_PROBE
+    record_dispatch(entry);
+#endif
+}
 
 template<class Function>
 Function original(const char* symbol) {
@@ -72,6 +103,13 @@ const xAOD::Muon& as_muon(const xAOD::IParticle& particle) {
     return *muon;
 }
 }
+
+#ifdef ATLAS_MUON_B_ALIAS_PROBE
+extern "C" const char* atlas_muon_b_momentum_alias(const CP::MuonCalibTool* tool) {
+    const auto aliases = momentum_aliases(tool);
+    return aliases && aliases->current ? aliases->current->c_str() : nullptr;
+}
+#endif
 
 namespace CP {
 asg::AcceptData AsgPtEtaSelectionTool::accept(const xAOD::IParticle* particle) const {
@@ -95,18 +133,73 @@ asg::AcceptData AsgPtEtaSelectionTool::accept(const xAOD::IParticle* particle) c
     return result;
 }
 
+StatusCode MuonCalibTool::initialize() {
+    using Signature = StatusCode (*)(MuonCalibTool*);
+    static const auto release = original<Signature>(momentum_initialize);
+    if (!configured(name(), momentum_tool)) return release(this);
+
+    trace_alias(Entry::momentum_state_init);
+    auto aliases = std::make_shared<MomentumAliases>();
+    aliases->stock_configuration = m_isRun3 && m_calibMode == correctData_CB &&
+        m_sysScheme.value() == "AllSys" && m_doEtaSagittaSys && !m_validationMode && !m_useRndRun &&
+        !m_extra_highpt_smearing && !m_2stations_highpt_smearing &&
+        m_release.value() == "Recs2025_12_11_Run2Run3" &&
+        m_MuonIntSagittaTool.empty() && m_MuonIntScaleSmearTool.empty() && m_MuonIntHighTSmearTool.empty();
+    if (aliases->stock_configuration) trace_alias(Entry::momentum_state_cache_enabled);
+
+    // Genuine initialization calls the setter after retrieving its subtools.
+    std::erase_if(momentum_states, [](const auto& item) { return item.second.expired(); });
+    momentum_states.insert_or_assign(this, aliases);
+    auto status = release(this);
+    if (status.isSuccess()) {
+        asg::AsgTool::addCleanup(aliases);
+    } else {
+        momentum_states.erase(this);
+    }
+    return status;
+}
+
 StatusCode MuonCalibTool::applySystematicVariation(const CP::SystematicSet& state) {
     using Signature = StatusCode (*)(MuonCalibTool*, const CP::SystematicSet&);
     static const auto release = original<Signature>(momentum_apply_state);
     auto status = release(this, state);
     if (!configured(name(), momentum_tool)) return status;
-    if (!status.isSuccess()) return status;
+    trace_alias(Entry::momentum_state_release_calls);
+    if (!status.isSuccess()) {
+        trace_alias(Entry::momentum_state_release_failures);
+        return status;
+    }
     record_dispatch(Entry::momentum_state);
+
+    const auto aliases = momentum_aliases(this);
+    if (!aliases) {
+        throw std::runtime_error("Frozen muon momentum tool must initialize on its analysis thread");
+    }
+    if (aliases->stock_configuration) {
+        const auto found = aliases->aliases.find(state);
+        if (found != aliases->aliases.end()) {
+            trace_alias(Entry::momentum_state_cache_hits);
+            aliases->current = found->second;
+            return status;
+        }
+    }
+
+    if (!aliases->stock_configuration || !aliases->affecting) {
+        trace_alias(Entry::momentum_state_catalog);
+        aliases->affecting = affectingSystematics();
+    }
     CP::SystematicSet filtered;
-    if (!CP::SystematicSet::filterForAffectingSystematics(state, affectingSystematics(), filtered)) {
+    trace_alias(Entry::momentum_state_filters);
+    if (!CP::SystematicSet::filterForAffectingSystematics(state, *aliases->affecting, filtered)) {
+        trace_alias(Entry::momentum_state_filter_failures);
         return StatusCode::FAILURE;
     }
-    momentum_states[this] = state_name(filtered);
+
+    aliases->current = state_name(filtered);
+    constexpr std::size_t max_cached_aliases = 128;
+    if (aliases->stock_configuration && aliases->aliases.size() < max_cached_aliases) {
+        aliases->aliases.emplace(state, *aliases->current);
+    }
     return status;
 }
 
@@ -124,12 +217,12 @@ CP::CorrectionCode MuonCalibTool::applyCorrection(xAOD::Muon& muon) const {
     if (!event.isValid() || !event->eventType(xAOD::EventInfo::IS_SIMULATION)) {
         throw std::runtime_error("Frozen muon momentum tool requires the MC EventInfo");
     }
-    auto state = momentum_states.find(this);
-    if (state == momentum_states.end()) {
+    const auto aliases = momentum_aliases(this);
+    if (!aliases || !aliases->current) {
         throw std::runtime_error("Frozen muon momentum tool did not bind its original systematic setter");
     }
     record_dispatch(Entry::momentum);
-    return apply_momentum(muon, *event, state->second);
+    return apply_momentum(muon, *event, *aliases->current);
 }
 
 CP::CorrectionCode MuonEfficiencyScaleFactors::getEfficiencyScaleFactor(

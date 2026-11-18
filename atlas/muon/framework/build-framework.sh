@@ -23,12 +23,16 @@ fi
 read -r -a root_cflags <<< "$(root-config --cflags)"
 read -r -a root_libs <<< "$(root-config --libs)"
 framework_library="$framework_output/libAtlasMuonFramework.so"
+probe_flags=()
+if [[ "${ATLAS_MUON_B_ALIAS_PROBE:-0}" == 1 ]]; then
+    probe_flags+=(-DATLAS_MUON_B_ALIAS_PROBE)
+fi
 {
     g++ --version
     root-config --cflags --libs
     python "$framework_source/release_symbols.py" "$release/lib" "$framework_output/release_symbols.h"
     set -x
-    g++ "${root_cflags[@]}" -O2 -g -shared -fPIC -DXAOD_STANDALONE -DXAOD_ANALYSIS \
+    g++ "${root_cflags[@]}" "${probe_flags[@]}" -O2 -g -shared -fPIC -DXAOD_STANDALONE -DXAOD_ANALYSIS \
         -DCOLUMNAR_MODE_NAME=ColumnarModeXAOD -DCOLUMNAR_MODE_SUFFIX= \
         -I"$framework_output" -I"$framework_core_include" -I"$release/include" \
         -I"$external/include" -I"$external/include/eigen3" \
