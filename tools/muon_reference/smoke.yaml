@@ -1,0 +1,40 @@
+CommonServices:
+  runSystematics: true
+  systematicsHistogram: systematicsList
+  separateWeightSystematics: true
+
+PileupReweighting: {}
+
+Muons:
+  - containerName: AnaMuons
+    inputContainer: AnalysisMuons
+    recalibratePhyslite: true
+    calibMode: correctData_CB
+    minPt: 3000.
+    maxEta: 2.7
+    WorkingPoint:
+      - selectionName: medium
+        quality: Medium
+        isolation: PflowTight_VarRad
+        trackSelection: true
+        maxD0Significance: 3.
+        maxDeltaZ0SinTheta: 0.5
+        systematicBreakdown: true
+        saveDetailedSF: true
+        saveCombinedSF: true
+
+Output:
+  containers:
+    mu_: AnaMuons
+  nonContainers: [EventInfo]
+  vars:
+    - EventInfo.eventNumber -> eventNumber
+    - EventInfo.runNumber -> runNumber
+    - EventInfo.mcChannelNumber -> mcChannelNumber
+    - EventInfo.RandomRunNumber -> randomRunNumber
+    - AnalysisMuons.muonType -> source_muonType
+    - AnalysisMuons.pt -> source_pt
+    - AnalysisMuons.eta -> source_eta
+    - AnalysisMuons.phi -> source_phi
+
+PrintConfiguration: {}
