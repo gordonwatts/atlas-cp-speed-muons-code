@@ -66,7 +66,7 @@ def measure(argv, directory, name, env):
 def main(
     destination: Path, original: Path, bridge: Path, provider: Path, payload: Path,
     installed_python: Path, demo: Path, accepted_full: Path, accepted_stored: Path,
-    modes: str = "stored,nominal,full",
+    modes: str = "stored,nominal,full", ab_only: bool = False,
 ):
     selected = modes.split(",")
     if len(set(selected)) != len(selected) or any(m not in {"stored", "nominal", "full"} for m in selected):
@@ -90,8 +90,9 @@ def main(
                  ATLAS_MUON_MOMENTUM=str(payload), ATLAS_MUON_SELECTION=str(payload), ATLAS_MUON_EFFICIENCY=str(payload))
     env_c = isolated_environment(installed_python)
     histogram_env = isolated_environment(Path(sys.executable))
-    # Rotate all six possible orders across the warm-up and measured blocks.
-    orders = ("ABC", "CBA", "BAC", "CAB", "BCA", "ACB")
+    # A B-budget recheck leaves the existing installed C cohort intact.
+    paths = "AB" if ab_only else "ABC"
+    orders = ("BA", "AB", "BA", "AB", "BA", "AB") if ab_only else ("ABC", "CBA", "BAC", "CAB", "BCA", "ACB")
     ledger = []
     for block, order in enumerate(orders):
         mode_order = selected if block % 2 == 0 else list(reversed(selected))
@@ -131,20 +132,20 @@ def main(
                                                             if p.suffix in {".root", ".npz"}},
                 }
             entry["host_after"] = host_activity()
-            # All three launches and clocks have finished before validation begins.
+            # All launches and clocks have finished before validation begins.
             for result in entry["paths"].values():
                 output = Path(result["directory"]) / "histogram.npz"
                 compare_output(output, accepted_stored if mode == "stored" else accepted_full, mode)
                 result["histogram_sha256"] = sha256(output)
             ledger.append(entry)
             write_json(destination / "runs.json", ledger)
-            print(f"Block {block} {mode} {order}: all three histograms checked", flush=True)
+            print(f"Block {block} {mode} {order}: all histograms checked", flush=True)
 
     summaries = {}
     for mode in selected:
         runs = [row["paths"] for row in ledger if row["mode"] == mode and not row["warmup"]]
         cohorts = {}
-        for name in "ABC":
+        for name in paths:
             parts = ("framework", "histogram", "total") if name != "C" else ("total",)
             for part in parts:
                 legs = [row[name]["total"] if part == "total" else row[name]["legs"][part] for row in runs]
@@ -153,15 +154,17 @@ def main(
         ratios = {}
         for field in ("wall_seconds", "cpu_total_seconds"):
             ratios[field] = {
-                "A_total_over_C_total": ratio_summary([row["A"]["total"][field] for row in runs],
-                                                       [row["C"]["total"][field] for row in runs]),
                 "B_framework_over_A_framework": ratio_summary([row["B"]["legs"]["framework"][field] for row in runs],
                                                                [row["A"]["legs"]["framework"][field] for row in runs]),
             }
+            if not ab_only:
+                ratios[field]["A_total_over_C_total"] = ratio_summary([row["A"]["total"][field] for row in runs],
+                                                                      [row["C"]["total"][field] for row in runs])
         summaries[mode] = {"cohorts": cohorts, "matched": ratios}
     write_json(destination / "benchmark.json", {"summaries": summaries, "protocol": {
         "CPU": 18, "priority": 10, "warmup": 1, "measured_blocks": 5, "orders": orders,
-        "standalone": "Fresh installed CPython, visible script, original PHYSLITE to closed histogram",
+        "paths": paths,
+        "standalone": None if ab_only else "Fresh installed CPython, visible script, original PHYSLITE to closed histogram",
         "framework": "Release setup outside timer, ordinary production ntuple, separate histogram leg",
         "sampling": "One effective analysis worker; separate process monitor; generated outputs checked outside clocks",
         "cache": "Shared warm OS/CVMFS caches; no eviction",

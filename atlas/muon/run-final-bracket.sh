@@ -9,6 +9,8 @@ bridge=${3:?verified framework bridge required}
 provider=${4:?verified uninstrumented provider required}
 payload=${5:?frozen shared payload required}
 modes=${6:-stored,nominal,full}
+opts=()
+if [[ ${7:-} == ab-only ]]; then opts+=(--ab-only); fi
 python="$install/pip-venv/bin/python"
 demo="$install/extracted/muon-standalone/bundle/muon_demo.py"
 installed="$install/pip-venv/lib/python3.14/site-packages/atlas_muon_portable"
@@ -21,4 +23,4 @@ CP_RUNNER=$(command -v CPRun.py)
 exec env -u PYTHONPATH -u PYTHONHOME "$python" "$repo/atlas/muon/benchmark_final.py" "$out" "$INPUT" \
     "$bridge" "$provider" "$payload" "$python" "$demo" \
     "$campaign/results/checkpoint-02/full-observer-01/histogram.npz" \
-    "$campaign/results/checkpoint-02/production-series-01/block-02-stored/histogram.npz" --modes "$modes"
+    "$campaign/results/checkpoint-02/production-series-01/block-02-stored/histogram.npz" --modes "$modes" "${opts[@]}"
