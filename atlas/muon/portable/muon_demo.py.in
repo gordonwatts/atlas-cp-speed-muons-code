@@ -11,6 +11,7 @@ for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "
                  "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ[variable] = "1"
 
+from enum import StrEnum
 import hashlib
 from importlib.metadata import version
 import json
@@ -22,21 +23,26 @@ from typing import Annotated
 import atlas_muon_portable
 from atlas_muon_portable.packing import order, pack_momentum, pack_selection
 from atlas_muon_portable.raw_input import (
-    SELECTION_ROLES, VERTEX_PREFIX, MuonChunk, branch_plan, check_branches, flat, numpy, verify_file,
+    MUON_PREFIX, SELECTION_ROLES, VERTEX_PREFIX, MuonChunk, branch_plan, check_branches, flat, numpy, verify_file,
 )
 from atlas_muon_portable.runtime import record_runtime
 import awkward as ak
-import correctionlib
-from correctionlib import _core, plugins
 import hist
 import numpy as np
 import typer
 import uproot
 
 
+class Mode(StrEnum):
+    full = "full"
+    nominal = "nominal"
+    stored = "stored"
+
+
 def main(
     original: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     output: Annotated[Path, typer.Argument(dir_okay=False)],
+    mode: Annotated[Mode, typer.Option(help="All calibrated states, calibrated NOSYS, or raw stored pT.")] = Mode.full,
     repeat: Annotated[int, typer.Option("--repeat", "-n", min=1, help="Full original-file passes. Save the final pass.")] = 1,
     stop: Annotated[int | None, typer.Option(min=0, help="Number of original entries from the start.")] = None,
     chunk_size: Annotated[int, typer.Option(min=1)] = 2000,
@@ -47,38 +53,43 @@ def main(
     if output.exists() or (runtime_record is not None and (runtime_record.exists() or runtime_record.resolve() == output.resolve())):
         raise FileExistsError("Choose fresh output and audit paths")
 
+    stored = mode == Mode.stored
     package = Path(atlas_muon_portable.__file__).resolve().parent
-    receipt = json.loads((package / "release.json").read_text(encoding="utf-8"))
-    if receipt["profile"] != "full" or version("correctionlib") != receipt["core"]["version"]:
-        raise RuntimeError("Install the paired full campaign and CorrectionLib wheels")
-    provider_path = package / "native" / "libatlas_muon.so"
-    payload_path = package / "payload.json"
     workflow = json.loads((package / "workflow.json").read_text(encoding="utf-8"))
-    plugins.load_library(provider_path)
-    correction_set = _core.CorrectionSet.from_file(str(payload_path))
-    eta_selection = correction_set["muon_selection_eta"]
-    vertex_selection = correction_set["muon_selection_vertex"]
-    track_roles = correction_set["muon_selection_track_roles"]
-    momentum = correction_set["muon_momentum"]
-    working_point = correction_set["muon_selection_after_calibration"]
-    reconstruction = correction_set["muon_eff_reco"]
-    isolation = correction_set["muon_eff_iso"]
-    track_to_vertex = correction_set["muon_eff_ttva"]
-    combined_efficiency = correction_set["muon_eff_product"]
-    for name, contract in receipt["corrections"].items():
-        node = correction_set[name]
-        if node.output_size != contract["width"] or [v.name for v in node.inputs] != contract["inputs"]:
-            raise RuntimeError(f"Unexpected installed interface for {name}")
+    if not stored:
+        import correctionlib
+        from correctionlib import _core, plugins
 
-    branches = branch_plan(workflow)
+        receipt = json.loads((package / "release.json").read_text(encoding="utf-8"))
+        if receipt["profile"] != "full" or version("correctionlib") != receipt["core"]["version"]:
+            raise RuntimeError("Install the paired full campaign and CorrectionLib wheels")
+        provider_path = package / "native" / "libatlas_muon.so"
+        payload_path = package / "payload.json"
+        plugins.load_library(provider_path)
+        correction_set = _core.CorrectionSet.from_file(str(payload_path))
+        eta_selection = correction_set["muon_selection_eta"]
+        vertex_selection = correction_set["muon_selection_vertex"]
+        track_roles = correction_set["muon_selection_track_roles"]
+        momentum = correction_set["muon_momentum"]
+        working_point = correction_set["muon_selection_after_calibration"]
+        efficiency_nodes = {
+            "RECO": correction_set["muon_eff_reco"], "ISO": correction_set["muon_eff_iso"],
+            "TTVA": correction_set["muon_eff_ttva"],
+        }
+        combined_efficiency = correction_set["muon_eff_product"]
+        for name, contract in receipt["corrections"].items():
+            node = correction_set[name]
+            if node.output_size != contract["width"] or [v.name for v in node.inputs] != contract["inputs"]:
+                raise RuntimeError(f"Unexpected installed interface for {name}")
+
+    branches = branch_plan(workflow, stored=stored)
     link_branches = {
-        "AnalysisMuonsAuxDyn." + item["branch"] for item in workflow["links"].values()
-    }
+        MUON_PREFIX + item["branch"] for item in workflow["links"].values()
+    } if not stored else set()
     ordinary_branches = tuple(branch for branch in branches if branch not in link_branches)
-    states = workflow["states"]["all_ordered"]
+    states = workflow["states"]["all_ordered"] if mode == Mode.full else ["NOSYS"]
     kinematic_states = set(workflow["states"]["kinematic"])
     weight_only = set(workflow["states"]["weight_only"])
-    efficiency_nodes = {"RECO": reconstruction, "ISO": isolation, "TTVA": track_to_vertex}
     axes = (
         hist.axis.Regular(100, 0., 500., name="pt_GeV", underflow=True, overflow=True),
         hist.axis.StrCategory(states, name="systematic", growth=False, flow=False),
@@ -116,6 +127,17 @@ def main(
                 })
                 if set(arrays) != set(branches):
                     raise RuntimeError("The input projection omitted requested branches")
+                if stored:
+                    # Read bare stored pT in MeV. Hist uses unit weights here.
+                    raw_pt = arrays[MUON_PREFIX + "pt"]
+                    pt_gev = flat(raw_pt, np.float64) / 1000.
+                    if not np.isfinite(pt_gev).all():
+                        raise ValueError("Non-finite stored histogram input")
+                    events += len(raw_pt)
+                    muons += pt_gev.size
+                    weighted.fill(pt_gev, "NOSYS", weight=None, threads=1)
+                    unweighted.fill(pt_gev, "NOSYS", threads=1)
+                    continue
                 chunk = MuonChunk(arrays, report.tree_entry_start, workflow["links"])
                 events += len(chunk.counts)
                 muons += chunk.muon_size
@@ -216,7 +238,7 @@ def main(
             count=counts, sumw=result.value, sumw2=result.variance,
         )
     summary = {
-        "output": str(output.resolve()), "entries": int(counts.sum()), "passes": pass_summaries,
+        "output": str(output.resolve()), "mode": mode.value, "entries": int(counts.sum()), "passes": pass_summaries,
         "events": pass_summaries[-1]["events"], "muons": pass_summaries[-1]["muons"],
         "event_visits": sum(item["events"] for item in pass_summaries),
         "muon_visits": sum(item["muons"] for item in pass_summaries),
@@ -229,7 +251,10 @@ def main(
     }
     print(json.dumps(summary))
     if runtime_record is not None:
-        record_runtime(runtime_record, atlas_muon_portable, correctionlib, _core, provider_path, payload_path)
+        if stored:
+            record_runtime(runtime_record, atlas_muon_portable)
+        else:
+            record_runtime(runtime_record, atlas_muon_portable, correctionlib, _core, provider_path, payload_path)
 
 
 if __name__ == "__main__":

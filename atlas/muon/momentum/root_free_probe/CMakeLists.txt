@@ -5,7 +5,7 @@ option(ATLAS_R01_BUILD_ROOT_ORACLE "Build the comparison executable linked to re
 set(ATLAS_R01_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Path to the actual provider compatibility header")
 add_executable(r01_standalone parity_probe.cxx)
 target_include_directories(r01_standalone PRIVATE "${ATLAS_R01_HEADER_DIR}")
-target_compile_features(r01_standalone PRIVATE cxx_std_23)
+target_compile_features(r01_standalone PRIVATE cxx_std_20)
 
 if(ATLAS_R01_BUILD_ROOT_ORACLE)
     find_package(ROOT 6.40.02 EXACT CONFIG REQUIRED COMPONENTS Core Hist MathCore)
