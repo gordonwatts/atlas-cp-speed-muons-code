@@ -1,0 +1,177 @@
+{
+  "source": "evidence/checkpoint-05/momentum-axis-inventory/{axes.txt,fixture-inventory.json}",
+  "payload_sha256": "2058e159cd2237bf5c846c2944287ce506886ef7caa17f93fb4d66b7b5f6270c",
+  "axis_fixture_sha256": "05cebeaa196fbcec5a36445a3a3c38ae2a6af08e196e00ffa5285f1f9200d150",
+  "distinct_axis_descriptors": 13,
+  "distinct_eta_phi_layout_pairs": 7,
+  "layout_pairs": [
+    {
+      "eta_axis": "payload-0",
+      "phi_axis": "payload-1",
+      "bins": [
+        18,
+        33
+      ],
+      "storage": [
+        "variable",
+        "variable"
+      ],
+      "maps": 228
+    },
+    {
+      "eta_axis": "payload-4",
+      "phi_axis": "payload-1",
+      "bins": [
+        18,
+        33
+      ],
+      "storage": [
+        "variable",
+        "variable"
+      ],
+      "maps": 180
+    },
+    {
+      "eta_axis": "payload-2",
+      "phi_axis": "payload-3",
+      "bins": [
+        24,
+        24
+      ],
+      "storage": [
+        "uniform",
+        "uniform"
+      ],
+      "maps": 36
+    },
+    {
+      "eta_axis": "payload-5",
+      "phi_axis": "payload-6",
+      "bins": [
+        32,
+        32
+      ],
+      "storage": [
+        "uniform",
+        "uniform"
+      ],
+      "maps": 48
+    },
+    {
+      "eta_axis": "payload-7",
+      "phi_axis": "payload-8",
+      "bins": [
+        32,
+        32
+      ],
+      "storage": [
+        "variable",
+        "variable"
+      ],
+      "maps": 9
+    },
+    {
+      "eta_axis": "payload-9",
+      "phi_axis": "payload-10",
+      "bins": [
+        8,
+        1
+      ],
+      "storage": [
+        "variable",
+        "uniform"
+      ],
+      "maps": 9
+    },
+    {
+      "eta_axis": "payload-11",
+      "phi_axis": "payload-12",
+      "bins": [
+        16,
+        16
+      ],
+      "storage": [
+        "variable",
+        "variable"
+      ],
+      "maps": 3
+    }
+  ],
+  "years": {
+    "Data16": {
+      "maps": 63,
+      "distinct_pairs": 2,
+      "maps_per_pair": {
+        "payload-0|payload-1": 51,
+        "payload-2|payload-3": 12
+      }
+    },
+    "Data17": {
+      "maps": 63,
+      "distinct_pairs": 2,
+      "maps_per_pair": {
+        "payload-0|payload-1": 51,
+        "payload-2|payload-3": 12
+      }
+    },
+    "Data18": {
+      "maps": 63,
+      "distinct_pairs": 2,
+      "maps_per_pair": {
+        "payload-0|payload-1": 51,
+        "payload-2|payload-3": 12
+      }
+    },
+    "Data22": {
+      "maps": 66,
+      "distinct_pairs": 5,
+      "maps_per_pair": {
+        "payload-0|payload-1": 6,
+        "payload-4|payload-1": 45,
+        "payload-5|payload-6": 9,
+        "payload-7|payload-8": 3,
+        "payload-9|payload-10": 3
+      }
+    },
+    "Data23": {
+      "maps": 66,
+      "distinct_pairs": 5,
+      "maps_per_pair": {
+        "payload-0|payload-1": 6,
+        "payload-4|payload-1": 45,
+        "payload-5|payload-6": 9,
+        "payload-7|payload-8": 3,
+        "payload-9|payload-10": 3
+      }
+    },
+    "Data24": {
+      "maps": 66,
+      "distinct_pairs": 5,
+      "maps_per_pair": {
+        "payload-0|payload-1": 6,
+        "payload-4|payload-1": 45,
+        "payload-5|payload-6": 9,
+        "payload-7|payload-8": 3,
+        "payload-9|payload-10": 3
+      }
+    },
+    "Data25": {
+      "maps": 63,
+      "distinct_pairs": 4,
+      "maps_per_pair": {
+        "payload-0|payload-1": 6,
+        "payload-4|payload-1": 45,
+        "payload-5|payload-6": 9,
+        "payload-11|payload-12": 3
+      }
+    },
+    "Run4": {
+      "maps": 63,
+      "distinct_pairs": 2,
+      "maps_per_pair": {
+        "payload-0|payload-1": 51,
+        "payload-5|payload-6": 12
+      }
+    }
+  }
+}

@@ -1,170 +1,32 @@
-# correctionlib
+# ATLAS muon calibration with CorrectionLib
 
-[![Actions Status][actions-badge]][actions-link]
-[![Documentation Status][rtd-badge]][rtd-link]
-[![Code style: black][black-badge]][black-link]
+This repository preserves the source history of the isolated Run 3 PHYSLITE muon study. **A** is the original AnalysisBase 25.2.117 workflow. **B** uses the shared CorrectionLib provider through the AnalysisBase framework bridge. **C** reads the original PHYSLITE directly with uproot and runs the same prescription in a standalone Python workflow. See the [companion results](https://github.com/gordonwatts/atlas-cp-speed-muons) for the report, plots, configurations, timing records and execution logs.
 
-[![conda version][conda-badge]][conda-link]
-[![PyPI version][pypi-version]][pypi-link]
-[![PyPI platforms][pypi-platforms]][pypi-link]
+## Repository map
 
-[![GitHub Discussion][github-discussions-badge]][github-discussions-link]
+| Path | Purpose |
+| --- | --- |
+| [`atlas/muon/provider.cxx`](atlas/muon/provider.cxx) and [`atlas/muon/CMakeLists.txt`](atlas/muon/CMakeLists.txt) | Provider registration and build of the shared CorrectionLib nodes |
+| [`atlas/muon/momentum/`](atlas/muon/momentum) | Momentum calibration and smearing, ROOT-compatible random draws, covariance reuse, exporters and numerical fixtures |
+| [`atlas/muon/efficiency/`](atlas/muon/efficiency) and [`atlas/muon/selection/`](atlas/muon/selection) | Efficiency and selection prescriptions and their configuration |
+| [`atlas/muon/framework/`](atlas/muon/framework) | Path B bridge, release symbol bindings, launch and dispatch verification |
+| [`atlas/muon/columnar/`](atlas/muon/columnar) and [`atlas/muon/portable/`](atlas/muon/portable) | Path C reader and output code, standalone script template, package assembly and install auditing |
+| [`tools/muon_reference/`](tools/muon_reference) | Path A analysis configuration, reference drivers, observer, histogramming and comparison helpers |
+| [`atlas/muon/`](atlas/muon) | Build, export, benchmark and validation entry points, including [the final A/B/C bracket](atlas/muon/run-final-bracket.sh) |
+| [`campaign/inspection/`](campaign/inspection) | Supplemental campaign inspection files, including patches and probes for experimental changes |
+| [`campaign/licenses/`](campaign/licenses) | Athena and ROOT source licensing and provenance |
+| [`src/`](src), [`include/`](include), [`tests/`](tests) | The inherited CorrectionLib evaluator, headers and test suite |
 
-## Introduction
+## Optimization history
 
-The purpose of this library is to provide a well-structured JSON data format for
-a wide variety of ad-hoc correction factors encountered in a typical HEP
-analysis and a companion evaluation tool suitable for use in C++ and python
-programs. Here we restrict our definition of correction factors to a class of
-functions with scalar inputs that produce a scalar output. This fork also adds
-an [experimental fixed-array output extension](docs/array-outputs.md) for
-payloads that explicitly declare ordered components. Ordinary payloads retain
-the scalar interface.
+The parent history is the [pinned CorrectionLib baseline](https://github.com/gordonwatts/correctionlib/tree/3dcfa20ec01fb40c4d5fec58383785519dec1c00). The campaign commits run from that revision through [`450a491`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/tree/450a491070be2aba4b6b70050dfa2f2396242030) with their original hashes and parents. The standalone assembly was pinned to [`92be0fc`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/92be0fc35363c37a3a7a21cdf4d0c6bb2ece6623).
 
-In python, the function signature is:
+| Commit | Retained change |
+| --- | --- |
+| [`8864a5c`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/8864a5ca57593d72620d09ea9f944721dc9a3d6b) | Reuse the six original Gaussian draws for a matching seed |
+| [`fb10b1d`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/fb10b1d972727354e8b9fd8f123e3ec748265050) | Reuse the track-covariance decomposition within each muon and state |
+| [`e9707bc`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/e9707bc18b16e24e8202bbbf7e7d9da97da08993) | Remove ROOT at runtime while preserving the original nonzero-seed stream |
+| [`1116e1e`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/1116e1e02fc9dcef8e218d2e11ee4e5b673bd893) | Reuse covariance factors across states with exactly equal matrices |
+| [`a3ad717`](https://github.com/gordonwatts/atlas-cp-speed-muons-code/commit/a3ad7179f0ae89bc7a2adc57cda3771a6e1a2aa2) | Reuse the filtered systematic set in the framework bridge |
 
-```python
-def f(*args: str | int | float) -> float:
-    return ...
-```
-
-In C++, the evaluator implements this currently as:
-
-```cpp
-double Correction::evaluate(const std::vector<std::variant<int, double, std::string>>& values) const;
-```
-
-The supported function classes include:
-
-- multi-dimensional binned lookups;
-- binned lookups pointing to multi-argument formulas with a restricted math
-  function set (`exp`, `sqrt`, etc.);
-- categorical (string or integer enumeration) maps;
-- input transforms (updating one input value in place); and
-- compositions of the above.
-
-Each function type is represented by a "node" in a call graph and holds all of
-its parameters in a JSON structure, described by the JSON schema. Possible
-future extension nodes might include weigted sums (which, when composed with the
-others, could represent a BDT) and perhaps simple MLPs.
-
-The tool should provide:
-
-- standardized, versioned [JSON schemas](https://json-schema.org/);
-- forward-porting tools (to migrate data written in older schema versions); and
-- a well-optimized C++ evaluator and python bindings (with numpy vectorization
-  support).
-
-This tool will definitely not provide:
-
-- support for `TLorentzVector` or other object-type inputs (such tools should be
-  written as a higher-level tool depending on this library as a low-level tool)
-
-Formula support currently includes a mostly-complete subset of the ROOT library
-`TFormula` class, and is implemented in a threadsafe standalone manner. The
-parsing grammar is formally defined and parsed through the use of a header-only
-[PEG parser library](https://github.com/yhirose/cpp-peglib). The supported
-features mirror CMSSW's
-[reco::formulaEvaluator](https://github.com/cms-sw/cmssw/pull/11516) and fully
-passes the test suite for that utility with the purposeful exception of the
-`TMath::` namespace. The python bindings may be able to call into
-[numexpr](https://numexpr.readthedocs.io/en/latest/user_guide.html), though, due
-to the tree-like structure of the corrections, it may prove difficult to exploit
-vectorization at levels other than the entrypoint.
-
-Detailed instructions for installing and using this package are provided in the
-[documentation][rtd-link].
-
-## Creating new corrections
-
-A demo/tutorial of the features is available in the [documentation][rtd-link]
-and also available interactively on
-[binder](https://mybinder.org/v2/gh/cms-nanoAOD/correctionlib/HEAD?labpath=binder%2Fcorrectionlib_tutorial.ipynb)
-
-The `correctionlib.schemav2` module provides a helpful framework for defining
-correction objects and `correctionlib.convert` includes select conversion
-routines for common types. Nodes can be type-checked as they are constructed
-using the
-[parse_obj](https://pydantic-docs.helpmanual.io/usage/models/#helper-functions)
-class method or by directly constructing them using keyword arguments.
-
-## Compatibility
-
-The evaluator keys on the `schema_version` field in the JSON data and only
-operates with the same major schema version. For minor versions, the evaluator
-MUST remain backwards-compatible with all older minor versions of the same major
-series, but MAY introduce new features that make it forwards-incompatible with
-older readers. For patch versions, the library MUST be fully
-backwards-compatible and MUST NOT introduce new features or schema changes.
-
-In practice we have not always lived up to these goals. The table below lists
-known deviations. Forwards-incompatible changes (marked "Forwards") are allowed
-under the versioning policy and are included for informational purposes only;
-backwards-incompatible changes (marked "Backwards") represent unintended breaks.
-
-| Version       | Break type                      | Change                                                                                                                                      |
-| ------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| v2.2.0        | Forwards (new node)             | `HashPRNG` node added; files using it require v2.2.0+                                                                                       |
-| v2.3.0        | Forwards (new edge format)      | `UniformBinning` object allowed for `edges`; requires v2.3.0+                                                                               |
-| v2.6.0        | Forwards (new edge values)      | String infinity sentinels (`"inf"`, `"-inf"`) allowed in edges; requires v2.6.0+                                                            |
-| v2.6.0–v2.6.3 | Backwards (patch rule violated) | Float `±inf` in edges rejected with no escape hatch; files using float infinities broke. `IGNORE_FLOAT_INF=True` workaround added in v2.6.4 |
-| v2.7.0        | Forwards (new flow value)       | `flow: "wrap"` added to `Binning`/`MultiBinning`; requires v2.7.0+                                                                          |
-| v2.8.0        | Forwards (`$schema` field)      | `"$schema"` key added to JSON, rejected by older Python parsers (`extra="forbid"`)                                                          |
-| v2.9.0        | Forwards (new node)             | `LWTNN` node added; files using it require v2.9.0+                                                                                          |
-
-## Developing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for details on setting up a development
-environment, testing, and building the documentation.
-
-[actions-badge]:
-  https://github.com/cms-nanoAOD/correctionlib/workflows/CI/badge.svg
-[actions-link]: https://github.com/cms-nanoAOD/correctionlib/actions
-[black-badge]: https://img.shields.io/badge/code%20style-black-000000.svg
-[black-link]: https://github.com/psf/black
-[conda-badge]: https://img.shields.io/conda/vn/conda-forge/correctionlib.svg
-[conda-link]: https://github.com/conda-forge/correctionlib-feedstock
-[github-discussions-badge]:
-  https://img.shields.io/static/v1?label=Discussions&message=Ask&color=blue&logo=github
-[github-discussions-link]:
-  https://github.com/cms-nanoAOD/correctionlib/discussions
-[pypi-link]: https://pypi.org/project/correctionlib/
-[pypi-platforms]: https://img.shields.io/pypi/pyversions/correctionlib
-[pypi-version]: https://badge.fury.io/py/correctionlib.svg
-[rtd-badge]:
-  https://github.com/cms-nanoAOD/correctionlib/actions/workflows/docs.yml/badge.svg
-[rtd-link]: https://cms-nanoAOD.github.io/correctionlib/
-
-## Experimental native node plugins (this fork)
-
-This branch adds native scalar correction nodes advertised by installed Python
-packages, while retaining a completely Python-free C++ build and runtime. See
-[the plugin guide](docs/node-plugins.md) for the SDK, packaging, validation,
-binary compatibility contract and examples. Extended payloads require this fork;
-stock upstream schema-v2 readers do not support the `extension` node.
-
-## Experimental native evaluation in this fork
-
-This fork supports two different uses of arrays. Passing many input points to a
-scalar correction returns one value per point. Declaring an array-valued
-correction returns a fixed, ordered set of components for one point. Together, N
-input points and S components produce a NumPy array of shape `(N, S)`. The
-components have only the meaning assigned in the payload; no systematic
-variation labels are reserved.
-
-The [combined guide](docs/batch-array-integration.md) links runnable C++ and
-Python examples and explains which graph paths use native batch callbacks.
-Separate [batch](docs/native-batches.md) and
-[array-output](docs/array-outputs.md) guides specify ownership, schemas, shape
-validation and provider rebuild requirements. Existing scalar schema-v2 payloads
-continue to work; array outputs use this fork's experimental schema v3.
-
-These changes are separate open PRs:
-[plugins #1](https://github.com/gordonwatts/correctionlib/pull/1),
-[native batches #2](https://github.com/gordonwatts/correctionlib/pull/2), and
-[array outputs #3](https://github.com/gordonwatts/correctionlib/pull/3). Develop
-combines them without merging the PRs into their target branches. Standalone
-evidence is in [batches](evidence/batches) and [arrays](evidence/arrays);
-[combined evidence](evidence/combined) tests the integrated implementation.
-Synthetic timing examples are not detector calibrations or full-analysis
-validation.
+For a clone with the evaluator dependencies, use `git clone --recurse-submodules https://github.com/gordonwatts/atlas-cp-speed-muons-code.git`. The reference jobs require the pinned AnalysisBase release and original CVMFS input. The standalone build and export also use the recorded calibration inputs and toolchain. See the [reference setup](https://github.com/gordonwatts/atlas-cp-speed-muons/blob/main/reference-setup.md) and [final build and run evidence](https://github.com/gordonwatts/atlas-cp-speed-muons/tree/main/evidence/checkpoint-17/reproduction) for the executed configuration and paths. The upstream [CorrectionLib README](https://github.com/gordonwatts/correctionlib/blob/3dcfa20ec01fb40c4d5fec58383785519dec1c00/README.md) describes the evaluator itself.

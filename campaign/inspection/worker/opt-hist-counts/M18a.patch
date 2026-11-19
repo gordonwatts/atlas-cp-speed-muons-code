@@ -1,0 +1,29 @@
+--- muon_demo.py
++++ muon_demo.py
+@@ -122,6 +122,10 @@
+     states = workflow["states"]["all_ordered"] if mode == Mode.full else ["NOSYS"]
+     kinematic_states = set(workflow["states"]["kinematic"])
+     weight_only = set(workflow["states"]["weight_only"])
++    count_alias_columns = {
++        state: column for column, state in enumerate(states)
++        if state != "NOSYS" and state in weight_only and state not in kinematic_states
++    } if "NOSYS" in states else {}
+     axes = (
+         hist.axis.Regular(100, 0., 500., name="pt_GeV", underflow=True, overflow=True),
+         hist.axis.StrCategory(states, name="systematic", growth=False, flow=False),
+@@ -235,8 +239,14 @@
+                     if not np.isfinite(pt_gev).all() or not np.isfinite(weights).all():
+                         raise ValueError(f"Non-finite selected histogram input in {state}")
+                     weighted.fill(pt_gev, state, weight=weights, threads=1)
+-                    unweighted.fill(pt_gev, state, threads=1)
++                    if state not in count_alias_columns:
++                        unweighted.fill(pt_gev, state, threads=1)
+             source_bytes = source.file.source.num_requested_bytes
++        if count_alias_columns:
++            # Weight-only states use exactly the nominal selected pT values.
++            nominal_column = unweighted.axes[1].index("NOSYS")
++            count_view = unweighted.view(flow=True)
++            count_view[:, list(count_alias_columns.values())] = count_view[:, nominal_column, None]
+         wall_seconds = time.perf_counter() - wall_start
+         cpu_seconds = time.process_time() - cpu_start
+         return weighted, unweighted, {

@@ -1,0 +1,194 @@
+diff --git a/atlas/muon/momentum/momentum.cxx b/atlas/muon/momentum/momentum.cxx
+--- a/atlas/muon/momentum/momentum.cxx
++++ b/atlas/muon/momentum/momentum.cxx
+@@ -12,8 +12,9 @@
+ #include <Eigen/LU>
+ 
+ #include <algorithm>
+-#include <array>
+-#include <cmath>
++#include <array>
++#include <cfenv>
++#include <cmath>
+ #include <cstdint>
+ #include <limits>
+ #include <memory>
+@@ -221,14 +222,94 @@
+     return root_compat::cartesian_pt(px, py);
+ }
+ 
+-double expected_resolution(const PeriodMaps& maps, const Muon& mu, Detector detector, bool add_mc_smearing) {
++// The production fast path must not introduce or suppress C floating-point
++// exceptions. Compare magnitude words so classification itself cannot trap.
++std::uint64_t magnitude_word(double value) {
++    return std::bit_cast<std::uint64_t>(value) & UINT64_C(0x7fffffffffffffff);
++}
++
++bool resolution_operand(double value, double maximum) {
++    const auto bits = magnitude_word(value);
++    return bits == 0 ||
++           (bits >= magnitude_word(0x1p-100) && bits <= magnitude_word(maximum));
++}
++
++bool resolution_axis(const Axis& axis) {
++    // The R01 loader already checks ordered finite edges and content size.
++    // A regular width here is either unused or at least 2^-172.
++    return axis.bins > 0 && axis.bins <= (1 << 20) &&
++           resolution_operand(axis.minimum, 0x1p6) && resolution_operand(axis.maximum, 0x1p6) &&
++           resolution_operand(axis.lower, 0x1p6) && resolution_operand(axis.upper, 0x1p6) &&
++           std::all_of(axis.edges.begin(), axis.edges.end(), [](double edge) {
++               return resolution_operand(edge, 0x1p6);
++           });
++}
++
++bool resolution_histogram(const Histogram& map) {
++    return resolution_axis(map.eta) && resolution_axis(map.phi) &&
++           std::all_of(map.content.begin(), map.content.end(), [](double cell) {
++               return resolution_operand(cell, 0x1p100);
++           });
++}
++
++bool resolution_period(const PeriodMaps& maps) {
++    const auto nominal_resolution = [&](Detector detector, ScaleParameter term) -> const Histogram& {
++        return maps.scale[detector][term * scale_variant_count + nominal];
++    };
++    return std::all_of(maps.expected.begin(), maps.expected.end(), resolution_histogram) &&
++           resolution_histogram(nominal_resolution(ID, r1)) &&
++           resolution_histogram(nominal_resolution(ID, r2)) &&
++           resolution_histogram(nominal_resolution(ME, r0)) &&
++           resolution_histogram(nominal_resolution(ME, r1)) &&
++           resolution_histogram(nominal_resolution(ME, r2));
++}
++
++bool resolution_environment() {
++#if defined(__x86_64__) && defined(__SSE2__) && defined(__GLIBC__) && defined(__USE_GNU)
++    constexpr unsigned int default_controls = 0x1f80;
++    constexpr unsigned int controls = 0xffc0;
++    constexpr unsigned int inexact = 0x0020;
++    // In this envelope the only new C floating-point exception could be
++    // inexact. It must already be sticky, and traps must be disabled.
++    return (_mm_getcsr() & (controls | inexact)) == (default_controls | inexact) &&
++           std::fegetround() == FE_TONEAREST && ::fegetexcept() == 0;
++#else
++    return false;
++#endif
++}
++
++bool resolution_row(const Muon& mu) {
++    return resolution_operand(mu.eta, 0x1p2) && resolution_operand(mu.phi, 0x1p6) &&
++           resolution_operand(mu.tracks[ID].raw_pt, 0x1p100) &&
++           resolution_operand(mu.tracks[ME].raw_pt, 0x1p100) &&
++           resolution_operand(mu.tracks[CB].pt, 0x1p100) &&
++           resolution_environment();
++}
++
++#ifdef ATLAS_MUON_M13_STATS
++enum ResolutionCount {
++    omitted_rows_12, original_rows_12, original_rows_40,
++    omitted_map_reads, original_map_reads, resolution_count
++};
++thread_local std::array<std::uint64_t, resolution_count> resolution_counts{};
++#endif
++
++double expected_resolution(const PeriodMaps& maps, const Muon& mu, Detector detector, bool add_mc_smearing) {
+     const double pt = mu.tracks[detector].raw_pt;
+     if (pt == 0) return 1e12;
+ 
+-    const auto expected = [&](ExpectedMap term) { return maps.expected[term].lookup(mu.eta, mu.phi); };
+-    const auto nominal_value = [&](ScaleParameter term) {
+-        return maps.scale_value(detector, term, nominal, mu.eta, mu.phi);
+-    };
++    const auto expected = [&](ExpectedMap term) {
++#ifdef ATLAS_MUON_M13_STATS
++        if (add_mc_smearing) ++resolution_counts[original_map_reads];
++#endif
++        return maps.expected[term].lookup(mu.eta, mu.phi);
++    };
++    const auto nominal_value = [&](ScaleParameter term) {
++#ifdef ATLAS_MUON_M13_STATS
++        ++resolution_counts[original_map_reads];
++#endif
++        return maps.scale_value(detector, term, nominal, mu.eta, mu.phi);
++    };
+     const auto combine = [&](double expected_value, ScaleParameter parameter) {
+         if (!add_mc_smearing) return expected_value;
+         return std::sqrt(std::pow(expected_value, 2) + std::pow(nominal_value(parameter), 2));
+@@ -570,8 +651,12 @@
+ class MomentumNode final : public correction::PluginNode {
+ public:
+     MomentumNode(const correction::PluginConfig& config, const correction::PluginContext& context)
+-        : payload_(config), result_size_(context.output_size()) {
+-        for (std::size_t i = 0; i < prefix_names.size(); ++i) {
++        : payload_(config), result_size_(context.output_size()) {
++        if (result_size_ == production_output_count) {
++            std::transform(payload_.periods.begin(), payload_.periods.end(),
++                           resolution_periods_.begin(), resolution_period);
++        }
++        for (std::size_t i = 0; i < prefix_names.size(); ++i) {
+             const auto type = i == state_in ? ValueType::string : (i < pt_in ? ValueType::integer : ValueType::real);
+             indices_[i] = context.input_index(prefix_names[i], type);
+         }
+@@ -687,12 +772,27 @@
+             const auto& maps = payload_.periods[mu.year];
+             mu.expected_percent_id = expected_resolution(maps, mu, ID, false);
+             mu.expected_percent_me = expected_resolution(maps, mu, ME, false);
+-            mu.expected_id = expected_resolution(maps, mu, ID, true) * mu.tracks[CB].pt;
+-            mu.expected_me = expected_resolution(maps, mu, ME, true) * mu.tracks[CB].pt;
+-            result[expected_percent_id_out] = mu.expected_percent_id;
+-            result[expected_percent_me_out] = mu.expected_percent_me;
+-            result[expected_id_out] = mu.expected_id;
+-            result[expected_me_out] = mu.expected_me;
++            // The smearing-inclusive estimates feed the trace and the RHO
++            // center calculation. Keep RHO and every unproved domain on the
++            // original path, along with both percentage estimates above.
++            if (result_size_ == output_count || state.action == Action::rho ||
++                !resolution_periods_[mu.year] || !resolution_row(mu)) {
++#ifdef ATLAS_MUON_M13_STATS
++                ++resolution_counts[result_size_ == output_count ? original_rows_40 : original_rows_12];
++#endif
++                mu.expected_id = expected_resolution(maps, mu, ID, true) * mu.tracks[CB].pt;
++                mu.expected_me = expected_resolution(maps, mu, ME, true) * mu.tracks[CB].pt;
++#ifdef ATLAS_MUON_M13_STATS
++            } else {
++                ++resolution_counts[omitted_rows_12];
++                resolution_counts[omitted_map_reads] += (magnitude_word(mu.tracks[ID].raw_pt) != 0 ? 5 : 0)
++                                                     + (magnitude_word(mu.tracks[ME].raw_pt) != 0 ? 6 : 0);
++#endif
++            }
++            result[expected_percent_id_out] = mu.expected_percent_id;
++            result[expected_percent_me_out] = mu.expected_percent_me;
++            result[expected_id_out] = mu.expected_id;
++            result[expected_me_out] = mu.expected_me;
+ 
+             if (!is_data) apply_scale_smear(mu, maps, state, result);
+             if (is_data || type != silicon_associated_forward_muon) apply_sagitta(mu, payload_, maps, state, result);
+@@ -724,8 +824,9 @@
+         result[energy_out] = root_compat::positive_mass_energy(result[pt_out], result[eta_out], muon_mass_mev);
+     }
+ 
+-    const Payload payload_;
+-    const std::size_t result_size_;
++    const Payload payload_;
++    const std::size_t result_size_;
++    std::array<bool, period_count> resolution_periods_{};
+     std::array<std::size_t, input_count> indices_{};
+ };
+ 
+@@ -771,5 +872,17 @@
+ }
+ 
++
++#ifdef ATLAS_MUON_M13_STATS
++extern "C" void atlas_muon_m13_reset_resolution_counts() {
++    atlas::momentum::resolution_counts = {};
++}
++
++extern "C" void atlas_muon_m13_read_resolution_counts(std::uint64_t* output) {
++    const auto& counts = atlas::momentum::resolution_counts;
++    std::copy(counts.begin(), counts.end(), output);
++}
++#endif
++
+ #ifdef ATLAS_MUON_M01_STATS
+ // Test-only symbols. Each call observes the calling thread's table.
+ extern "C" void atlas_muon_m01_rng_cache_counts(std::uint64_t* output) {

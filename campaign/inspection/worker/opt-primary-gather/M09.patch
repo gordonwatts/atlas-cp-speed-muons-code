@@ -1,0 +1,105 @@
+diff --git a/atlas/muon/columnar/raw_input.py b/atlas/muon/columnar/raw_input.py
+--- a/atlas/muon/columnar/raw_input.py
++++ b/atlas/muon/columnar/raw_input.py
+@@ -230,5 +230,30 @@ class MuonChunk:
+                 selected[rows] = values(name)[rows]
+         return selected
+ 
++    def primary_track_inputs(self, primary, momentum):
++        """Pack the selected primary role from existing momentum lanes where available."""
++        def perigee(role, field):
++            if field != "vz" and role in MOMENTUM_ROLES:
++                return momentum[f"{role}_{field}"]
++            return self.track(role, field)
++
++        diagonal = {}
++        for code, role in enumerate(SELECTION_ROLES, 1):
++            if not np.any(primary == code):
++                continue
++            if role in MOMENTUM_ROLES:
++                diagonal[role] = momentum[f"{role}_cov_diag_size"], momentum[f"{role}_cov_diag_0"]
++            else:
++                sizes, values = self.covariance(role, COV_DIAG, 5)
++                diagonal[role] = sizes, values[:, 0]
++
++        return {
++            **{f"primary_{field}": self.choose_track(
++                primary, lambda role: perigee(role, field), np.float64, 0,
++            ) for field in ("d0", "phi", "z0", "vz")},
++            "primary_cov_diag_size": self.choose_track(primary, lambda role: diagonal[role][0], np.int64, -1),
++            "primary_var_d0": self.choose_track(primary, lambda role: diagonal[role][1], np.float64, 0),
++        }
++
+     def jagged(self, values, dtype):
+         return ak.unflatten(np.asarray(values, dtype=dtype), self.counts)
+diff --git a/atlas/muon/columnar/muon_analysis.py b/atlas/muon/columnar/muon_analysis.py
+--- a/atlas/muon/columnar/muon_analysis.py
++++ b/atlas/muon/columnar/muon_analysis.py
+@@ -185,7 +185,9 @@ class NativeWorkflow:
+             **{f"{key}_link_valid": links[key] for key in MOMENTUM_ROLES},
+             **{key: chunk.muon(branch, INT64) for key, branch in SELECTION_MUON_INTS.items()},
+         }
+-        selection.update(self.track_selection_inputs(chunk, selection["primary_role"], roles[:, 1].astype(INT64)))
++        selection.update(
++            self.track_selection_inputs(chunk, selection["primary_role"], roles[:, 1].astype(INT64), common),
++        )
+ 
+         for role in MOMENTUM_ROLES:
+             for field in ("q_over_p", "theta", "cov_diag_size"):
+@@ -205,7 +207,7 @@ class NativeWorkflow:
+         )
+         return common, selection
+ 
+-    def track_selection_inputs(self, chunk, primary, id_summary):
++    def track_selection_inputs(self, chunk, primary, id_summary, momentum):
+         vertices = chunk.columns[VERTEX_PREFIX + "vertexType"]
+         z = chunk.columns[VERTEX_PREFIX + "z"]
+         vertex_counts = numpy(ak.num(vertices, axis=1), INT64)
+@@ -213,16 +215,8 @@ class NativeWorkflow:
+             raise ValueError("Primary vertex columns disagree in shape")
+         is_primary = self.vertex_kind(vertex_type=flat(vertices, INT64)) == 1
+         primary_z = numpy(ak.fill_none(ak.firsts(z[ak.unflatten(is_primary, vertex_counts)]), 0.0), np.float64)
+-        primary_diag = {}
+-        for i, role in enumerate(SELECTION_ROLES, 1):
+-            if np.any(primary == i):
+-                primary_diag[role] = chunk.covariance(role, COV_DIAG, 5)
+         return {
+-            **{f"primary_{name}": chunk.choose_track(
+-                primary, lambda role: chunk.track(role, name), np.float64, 0,
+-            ) for name in ("d0", "phi", "z0", "vz")},
+-            "primary_cov_diag_size": chunk.choose_track(primary, lambda role: primary_diag[role][0], INT64, -1),
+-            "primary_var_d0": chunk.choose_track(primary, lambda role: primary_diag[role][1][:, 0], np.float64, 0),
++            **chunk.primary_track_inputs(primary, momentum),
+             **{name: chunk.choose_track(
+                 id_summary, lambda role: chunk.track(role, field, INT64, unavailable=-1, optional=True), INT64, -1,
+             ) for name, field in TRACK_SUMMARIES.items()},
+diff --git a/atlas/muon/portable/atlas_muon_portable/packing.py b/atlas/muon/portable/atlas_muon_portable/packing.py
+--- a/atlas/muon/portable/atlas_muon_portable/packing.py
++++ b/atlas/muon/portable/atlas_muon_portable/packing.py
+@@ -2,7 +2,7 @@
+ 
+ import numpy as np
+ 
+-from .raw_input import COV_DIAG, COV_OFF, MOMENTUM_ROLES, PERIGEE_FIELDS, SELECTION_ROLES, TRACK_SUMMARIES, UINT32_MAX
++from .raw_input import COV_DIAG, COV_OFF, MOMENTUM_ROLES, PERIGEE_FIELDS, TRACK_SUMMARIES, UINT32_MAX
+ 
+ SELECTION_MUON_INTS = {
+     "author": "author", "all_authors": "allAuthors", "precision_layers": "numberOfPrecisionLayers",
+@@ -59,16 +59,7 @@ def pack_selection(chunk, eta_bits, muon_type, links, track_roles, primary_vertex_z, momentum):
+         fields[f"{role}_var_q_over_p"] = momentum[f"{role}_cov_diag_4"]
+     fields["cb_phi"] = momentum["cb_phi"]
+ 
+-    primary_diag = {
+-        name: chunk.covariance(name, COV_DIAG, 5)
+-        for index, name in enumerate(SELECTION_ROLES, 1) if np.any(primary == index)
+-    }
+-    for name in ("d0", "phi", "z0", "vz"):
+-        fields[f"primary_{name}"] = chunk.choose_track(
+-            primary, lambda role: chunk.track(role, name), np.float64, 0,
+-        )
+-    fields["primary_cov_diag_size"] = chunk.choose_track(primary, lambda role: primary_diag[role][0], np.int64, -1)
+-    fields["primary_var_d0"] = chunk.choose_track(primary, lambda role: primary_diag[role][1][:, 0], np.float64, 0)
++    fields.update(chunk.primary_track_inputs(primary, momentum))
+     for name, branch in TRACK_SUMMARIES.items():
+         fields[name] = chunk.choose_track(
+             id_summary, lambda role: chunk.track(role, branch, np.int64, unavailable=-1, optional=True),

@@ -1,0 +1,362 @@
+diff --git a/atlas/muon/momentum/momentum.cxx b/atlas/muon/momentum/momentum.cxx
+--- a/atlas/muon/momentum/momentum.cxx
++++ b/atlas/muon/momentum/momentum.cxx
+@@ -216,14 +216,15 @@
+     return root_compat::cartesian_pt(px, py);
+ }
+ 
+-double expected_resolution(const PeriodMaps& maps, const Muon& mu, Detector detector, bool add_mc_smearing) {
+-    const double pt = mu.tracks[detector].raw_pt;
+-    if (pt == 0) return 1e12;
+-
+-    const auto expected = [&](ExpectedMap term) { return maps.expected[term].lookup(mu.eta, mu.phi); };
+-    const auto nominal_value = [&](ScaleParameter term) {
+-        return maps.scale_value(detector, term, nominal, mu.eta, mu.phi);
+-    };
++double expected_resolution(const PeriodMaps& maps, BinLookup& bins, const Muon& mu,
++                           Detector detector, bool add_mc_smearing) {
++    const double pt = mu.tracks[detector].raw_pt;
++    if (pt == 0) return 1e12;
++
++    const auto expected = [&](ExpectedMap term) { return bins.value(maps.expected[term]); };
++    const auto nominal_value = [&](ScaleParameter term) {
++        return maps.scale_value(detector, term, nominal, bins);
++    };
+     const auto combine = [&](double expected_value, ScaleParameter parameter) {
+         if (!add_mc_smearing) return expected_value;
+         return std::sqrt(std::pow(expected_value, 2) + std::pow(nominal_value(parameter), 2));
+@@ -261,18 +262,18 @@
+     }
+ }
+ 
+-ScaleConstants scale_constants(const PeriodMaps& maps, const Muon& mu, Detector detector, State state) {
+-    ScaleConstants constants{};
+-    for (int i = 0; i < scale_parameter_count; ++i) {
+-        const auto parameter = static_cast<ScaleParameter>(i);
+-        double value = maps.scale_value(detector, parameter, nominal, mu.eta, mu.phi);
+-        if (varies_parameter(state.action, detector, parameter)) {
+-            if (state.direction > 0) {
+-                value += maps.scale_value(detector, parameter, up_error, mu.eta, mu.phi);
+-            } else {
+-                value -= maps.scale_value(detector, parameter, down_error, mu.eta, mu.phi);
+-            }
+-        }
++ScaleConstants scale_constants(const PeriodMaps& maps, BinLookup& bins, Detector detector, State state) {
++    ScaleConstants constants{};
++    for (int i = 0; i < scale_parameter_count; ++i) {
++        const auto parameter = static_cast<ScaleParameter>(i);
++        double value = maps.scale_value(detector, parameter, nominal, bins);
++        if (varies_parameter(state.action, detector, parameter)) {
++            if (state.direction > 0) {
++                value += maps.scale_value(detector, parameter, up_error, bins);
++            } else {
++                value -= maps.scale_value(detector, parameter, down_error, bins);
++            }
++        }
+         constants[i] = parameter >= r0 ? std::max(0.0, value) : value;
+     }
+     return constants;
+@@ -351,10 +352,10 @@
+     return (cb_pt + cb_pt * scale_cb) / (1 + smear);
+ }
+ 
+-void apply_scale_smear(Muon& mu, const PeriodMaps& maps, State state, double* result) {
+-    const auto id = scale_constants(maps, mu, ID, state);
+-    const auto me = scale_constants(maps, mu, ME, state);
+-    const auto cb = scale_constants(maps, mu, CB, state);
++void apply_scale_smear(Muon& mu, const PeriodMaps& maps, BinLookup& bins, State state, double* result) {
++    const auto id = scale_constants(maps, bins, ID, state);
++    const auto me = scale_constants(maps, bins, ME, state);
++    const auto cb = scale_constants(maps, bins, CB, state);
+ 
+     const double id_pt = scale_smear_pt(mu, ID, id);
+     const double me_pt = scale_smear_pt(mu, ME, me);
+@@ -375,10 +376,10 @@
+     result[scale_me_out] = mu.tracks[ME].pt;
+ }
+ 
+-std::optional<double> sagitta_correction(const Payload& payload, const PeriodMaps& maps,
+-                                         const Muon& mu, Detector detector, State state) {
+-    const auto& histograms = maps.sagitta[detector];
+-    const auto value = [&](SagittaMap map) { return histograms[map].value().lookup(mu.eta, mu.phi); };
++std::optional<double> sagitta_correction(const Payload& payload, const PeriodMaps& maps, BinLookup& bins,
++                                         const Muon& mu, Detector detector, State state) {
++    const auto& histograms = maps.sagitta[detector];
++    const auto value = [&](SagittaMap map) { return bins.value(histograms[map].value()); };
+     if (mu.is_data) {
+         return value(data_nominal) - value(mc_nominal);
+     }
+@@ -511,6 +512,6 @@
+ 
+-void apply_sagitta(Muon& mu, const Payload& payload, const PeriodMaps& maps, State state, double* result) {
+-    const auto id_correction = sagitta_correction(payload, maps, mu, ID, state);
+-    const auto me_correction = sagitta_correction(payload, maps, mu, ME, state);
+-    const auto cb_correction = sagitta_correction(payload, maps, mu, CB, state);
++void apply_sagitta(Muon& mu, const Payload& payload, const PeriodMaps& maps, BinLookup& bins, State state, double* result) {
++    const auto id_correction = sagitta_correction(payload, maps, bins, mu, ID, state);
++    const auto me_correction = sagitta_correction(payload, maps, bins, mu, ME, state);
++    const auto cb_correction = sagitta_correction(payload, maps, bins, mu, CB, state);
+     const double id_pt = sagitta_pt(mu, ID, id_correction);
+@@ -657,11 +658,12 @@
+                 result[g0_out + i] = mu.gaussian[i];
+             }
+ 
+-            const auto& maps = payload_.periods[mu.year];
+-            mu.expected_percent_id = expected_resolution(maps, mu, ID, false);
+-            mu.expected_percent_me = expected_resolution(maps, mu, ME, false);
+-            mu.expected_id = expected_resolution(maps, mu, ID, true) * mu.tracks[CB].pt;
+-            mu.expected_me = expected_resolution(maps, mu, ME, true) * mu.tracks[CB].pt;
++            const auto& maps = payload_.periods[mu.year];
++            BinLookup bins(mu.eta, mu.phi);
++            mu.expected_percent_id = expected_resolution(maps, bins, mu, ID, false);
++            mu.expected_percent_me = expected_resolution(maps, bins, mu, ME, false);
++            mu.expected_id = expected_resolution(maps, bins, mu, ID, true) * mu.tracks[CB].pt;
++            mu.expected_me = expected_resolution(maps, bins, mu, ME, true) * mu.tracks[CB].pt;
+             result[expected_percent_id_out] = mu.expected_percent_id;
+             result[expected_percent_me_out] = mu.expected_percent_me;
+             result[expected_id_out] = mu.expected_id;
+@@ -668,7 +670,7 @@
+             result[expected_me_out] = mu.expected_me;
+ 
+-            if (!is_data) apply_scale_smear(mu, maps, state, result);
+-            if (is_data || type != silicon_associated_forward_muon) apply_sagitta(mu, payload_, maps, state, result);
++            if (!is_data) apply_scale_smear(mu, maps, bins, state, result);
++            if (is_data || type != silicon_associated_forward_muon) apply_sagitta(mu, payload_, maps, bins, state, result);
+ 
+             auto& cb = mu.tracks[CB];
+             const auto& id = mu.tracks[ID];
+diff --git a/atlas/muon/momentum/momentum_payload.h b/atlas/muon/momentum/momentum_payload.h
+--- a/atlas/muon/momentum/momentum_payload.h
++++ b/atlas/muon/momentum/momentum_payload.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+-#include <array>
++#include <array>
++#include <cstddef>
+ #include <map>
+ #include <optional>
+ #include <string>
+@@ -40,13 +41,28 @@
+     int coordinate_bin(double coordinate) const;
+ };
+ 
+-struct Histogram {
+-    Axis eta;
+-    Axis phi;
+-    std::vector<double> content;
+-
+-    double lookup(double track_eta, double track_phi) const;
+-};
++constexpr std::size_t bin_cache_slots = 8;
++
++struct Histogram {
++    Axis eta;
++    Axis phi;
++    std::vector<double> content;
++    std::size_t layout_slot = bin_cache_slots;
++
++    std::size_t cell_index(double eta_coordinate, double phi_coordinate) const;
++    double lookup(double track_eta, double track_phi) const;
++};
++
++class BinLookup {
++public:
++    BinLookup(double eta, double phi);
++    double value(const Histogram& histogram);
++
++private:
++    double eta_;
++    double phi_;
++    std::array<std::size_t, bin_cache_slots> indices_;
++};
+ 
+ struct PeriodMaps {
+     std::array<std::array<Histogram, scale_parameter_count * scale_variant_count>, detector_count> scale;
+@@ -53,8 +69,8 @@
+     std::array<Histogram, expected_map_count> expected;
+     std::array<std::array<std::optional<Histogram>, sagitta_map_count>, detector_count> sagitta;
+ 
+-    double scale_value(Detector detector, ScaleParameter parameter, ScaleVariant variant,
+-                       double eta, double phi) const;
++    void assign_layout_slots();
++    double scale_value(Detector detector, ScaleParameter parameter, ScaleVariant variant, BinLookup& bins) const;
+ };
+ 
+ struct Payload {
+diff --git a/atlas/muon/momentum/momentum_payload.cxx b/atlas/muon/momentum/momentum_payload.cxx
+--- a/atlas/muon/momentum/momentum_payload.cxx
++++ b/atlas/muon/momentum/momentum_payload.cxx
+@@ -18,7 +18,36 @@
+ namespace {
+ 
+ using Json = rapidjson::Value;
+-using namespace std::literals;
++using namespace std::literals;
++
++constexpr auto empty_bin = std::numeric_limits<std::size_t>::max();
++
++#ifdef ATLAS_MUON_M04_STATS
++struct BinCounts {
++    std::uint64_t map_reads = 0;
++    std::uint64_t reused_bins = 0;
++    std::uint64_t first_bins = 0;
++    std::uint64_t fallback_bins = 0;
++    std::uint64_t eta_uniform = 0;
++    std::uint64_t eta_variable = 0;
++    std::uint64_t phi_uniform = 0;
++    std::uint64_t phi_variable = 0;
++};
++thread_local BinCounts bin_counts{};
++#endif
++
++bool same_axis(const Axis& left, const Axis& right) {
++    const auto same_word = [](double a, double b) {
++        return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
++    };
++    // An empty edge vector encodes a regular ROOT axis. Explicit edges
++    // are a different layout even when their geometric positions agree.
++    return left.bins == right.bins &&
++           same_word(left.minimum, right.minimum) && same_word(left.maximum, right.maximum) &&
++           same_word(left.lower, right.lower) && same_word(left.upper, right.upper) &&
++           left.edges.size() == right.edges.size() &&
++           std::equal(left.edges.begin(), left.edges.end(), right.edges.begin(), same_word);
++}
+ 
+ void check(bool valid, const char* message) {
+     if (!valid) throw std::invalid_argument(message);
+@@ -111,10 +140,11 @@
+         check_size(sagitta[detector], sagitta_map_count);
+         for (rapidjson::SizeType i = 0; i < sagitta[detector].Size(); ++i) {
+             if (i == data_pt_extra && sagitta[detector][i].IsNull()) continue;
+-            period.sagitta[detector][i] = histogram_from_json(sagitta[detector][i]);
+-        }
+-    }
+-}
++            period.sagitta[detector][i] = histogram_from_json(sagitta[detector][i]);
++        }
++    }
++    period.assign_layout_slots();
++}
+ 
+ constexpr std::pair<std::string_view, Action> actions[] = {
+     {"nominal", Action::nominal}, {"smear_cb", Action::smear_cb}, {"smear_id", Action::smear_id},
+@@ -145,16 +175,83 @@
+     return root_compat::axis_find_fix_bin(bounded, bins, minimum, maximum, edges);
+ }
+ 
+-double Histogram::lookup(double track_eta, double track_phi) const {
+-    const int x = eta.coordinate_bin(track_eta);
+-    const int y = phi.coordinate_bin(track_phi);
+-    return content.at(root_compat::th2_global_bin(x, y, eta.bins, phi.bins));
+-}
+-
+-double PeriodMaps::scale_value(Detector detector, ScaleParameter parameter, ScaleVariant variant,
+-                              double eta, double phi) const {
+-    return scale[detector][parameter * scale_variant_count + variant].lookup(eta, phi);
+-}
++std::size_t Histogram::cell_index(double eta_coordinate, double phi_coordinate) const {
++#ifdef ATLAS_MUON_M04_STATS
++    ++(eta.edges.empty() ? bin_counts.eta_uniform : bin_counts.eta_variable);
++    ++(phi.edges.empty() ? bin_counts.phi_uniform : bin_counts.phi_variable);
++#endif
++    const int x = eta.coordinate_bin(eta_coordinate);
++    const int y = phi.coordinate_bin(phi_coordinate);
++    return root_compat::th2_global_bin(x, y, eta.bins, phi.bins);
++}
++
++double Histogram::lookup(double track_eta, double track_phi) const {
++    return content.at(cell_index(track_eta, track_phi));
++}
++
++BinLookup::BinLookup(double eta, double phi) : eta_(eta), phi_(phi) {
++    indices_.fill(empty_bin);
++}
++
++double BinLookup::value(const Histogram& histogram) {
++#ifdef ATLAS_MUON_M04_STATS
++    ++bin_counts.map_reads;
++#endif
++    if (histogram.layout_slot >= bin_cache_slots) {
++#ifdef ATLAS_MUON_M04_STATS
++        ++bin_counts.fallback_bins;
++#endif
++        return histogram.lookup(eta_, phi_);
++    }
++
++    auto& index = indices_[histogram.layout_slot];
++    if (index == empty_bin) {
++#ifdef ATLAS_MUON_M04_STATS
++        ++bin_counts.first_bins;
++#endif
++        index = histogram.cell_index(eta_, phi_);
++    }
++#ifdef ATLAS_MUON_M04_STATS
++    else {
++        ++bin_counts.reused_bins;
++    }
++#endif
++    return histogram.content.at(index);
++}
++
++void PeriodMaps::assign_layout_slots() {
++    // Representatives are used only while assigning slots within this period.
++    std::array<const Histogram*, bin_cache_slots> representatives{};
++    std::size_t used = 0;
++    const auto assign = [&](Histogram& histogram) {
++        histogram.layout_slot = bin_cache_slots;
++        for (std::size_t slot = 0; slot < used; ++slot) {
++            const auto& first = *representatives[slot];
++            if (same_axis(histogram.eta, first.eta) && same_axis(histogram.phi, first.phi)) {
++                histogram.layout_slot = slot;
++                return;
++            }
++        }
++        if (used < representatives.size()) {
++            histogram.layout_slot = used;
++            representatives[used++] = &histogram;
++        }
++    };
++
++    for (auto& detector : scale) {
++        for (auto& histogram : detector) assign(histogram);
++    }
++    for (auto& histogram : expected) assign(histogram);
++    for (auto& detector : sagitta) {
++        for (auto& histogram : detector) {
++            if (histogram) assign(*histogram);
++        }
++    }
++}
++
++double PeriodMaps::scale_value(Detector detector, ScaleParameter parameter, ScaleVariant variant, BinLookup& bins) const {
++    return bins.value(scale[detector][parameter * scale_variant_count + variant]);
++}
+ 
+ Payload::Payload(const correction::PluginConfig& config) {
+     config.require_keys({"release", "athena", "rng", "fixed_rho", "extra_rebias", "years", "states"});
+@@ -192,4 +289,23 @@
+     }
+ }
+ 
+-} // namespace atlas::momentum
++} // namespace atlas::momentum
++
++#ifdef ATLAS_MUON_M04_STATS
++// Test-only measurements on the calling thread.
++extern "C" void atlas_muon_m04_bin_counts(std::uint64_t* output) {
++    const auto& counts = atlas::momentum::bin_counts;
++    output[0] = counts.map_reads;
++    output[1] = counts.reused_bins;
++    output[2] = counts.first_bins;
++    output[3] = counts.fallback_bins;
++    output[4] = counts.eta_uniform;
++    output[5] = counts.eta_variable;
++    output[6] = counts.phi_uniform;
++    output[7] = counts.phi_variable;
++}
++
++extern "C" void atlas_muon_m04_reset_bin_counts() {
++    atlas::momentum::bin_counts = {};
++}
++#endif

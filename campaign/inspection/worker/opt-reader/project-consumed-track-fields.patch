@@ -1,0 +1,16 @@
+diff --git a/atlas/muon/columnar/raw_input.py b/atlas/muon/columnar/raw_input.py
+--- a/atlas/muon/columnar/raw_input.py
++++ b/atlas/muon/columnar/raw_input.py
+@@ -72,8 +72,11 @@ def branch_plan(workflow, *, stored=False, observe=False):
+     for role, link in workflow["links"].items():
+         branches.add(MUON_PREFIX + link["branch"])
+         for target in link["targets"].values():
+-            fields = set(PERIGEE_FIELDS.values()) | {"vz", COV_DIAG}
++            # Selection can use any primary role. Link resolution also needs
++            # qOverP for the event-local target extent, even for selection-only roles.
++            fields = {"d0", "z0", "phi", "vz", "qOverP", COV_DIAG}
+             if role in MOMENTUM_ROLES:
++                fields.update(PERIGEE_FIELDS.values())
+                 fields.add(COV_OFF)
+             branches.update(track_branch(target, field) for field in fields)
+             branches.update(

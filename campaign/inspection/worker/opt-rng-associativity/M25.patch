@@ -1,0 +1,64 @@
+diff --git a/atlas/muon/momentum/momentum.cxx b/atlas/muon/momentum/momentum.cxx
+--- a/atlas/muon/momentum/momentum.cxx
++++ b/atlas/muon/momentum/momentum.cxx
+@@ -96,10 +96,15 @@
+ using GaussianDraws = std::array<double, 6>;
+ constexpr std::size_t rng_cache_slots = 8192;
++constexpr std::size_t rng_cache_ways = 4;
++constexpr std::size_t rng_cache_sets = rng_cache_slots / rng_cache_ways;
+ 
+ struct GaussianCacheEntry {
+     GaussianDraws draws;
+     std::uint32_t seed;
+     bool valid;
+ };
+ 
+-thread_local std::array<GaussianCacheEntry, rng_cache_slots> rng_cache{};
++using GaussianCacheSet = std::array<GaussianCacheEntry, rng_cache_ways>;
++thread_local std::array<GaussianCacheSet, rng_cache_sets> rng_cache{};
++// Keep the replacement positions separate so each set holds exactly four entries.
++thread_local std::array<std::uint8_t, rng_cache_sets> rng_cache_next_way{};
+@@ -127,19 +132,25 @@ GaussianDraws gaussians_for_seed(std::uint32_t seed) {
+         return draw_gaussians(seed);
+     }
+ 
+-    auto& entry = rng_cache[seed & (rng_cache_slots - 1)];
+-    if (entry.valid && entry.seed == seed) {
++    const std::size_t set_index = seed & (rng_cache_sets - 1);
++    auto& set = rng_cache[set_index];
++    for (const auto& entry : set) {
++        if (!entry.valid || entry.seed != seed) continue;
+ #ifdef ATLAS_MUON_M01_STATS
+         ++rng_cache_counts.hits;
+ #endif
+         return entry.draws;
+     }
++
++    auto& next_way = rng_cache_next_way[set_index];
++    auto& entry = set[next_way];
+ #ifdef ATLAS_MUON_M01_STATS
+     ++rng_cache_counts.misses;
+     if (entry.valid) ++rng_cache_counts.overwrites;
+ #endif
+     entry.draws = draw_gaussians(seed);
+     entry.seed = seed;
+     entry.valid = true;
++    next_way = static_cast<std::uint8_t>((next_way + 1) % rng_cache_ways);
+     return entry.draws;
+ }
+@@ -729,10 +740,13 @@ extern "C" void atlas_muon_m01_rng_cache_counts(std::uint64_t* output) {
+ }
+ 
+ extern "C" void atlas_muon_m01_rng_cache_reset() {
+-    for (auto& entry : atlas::momentum::rng_cache) entry.valid = false;
++    for (auto& set : atlas::momentum::rng_cache) {
++        for (auto& entry : set) entry.valid = false;
++    }
++    atlas::momentum::rng_cache_next_way.fill(0);
+     atlas::momentum::rng_cache_counts = {};
+ }
+ 
+ extern "C" std::size_t atlas_muon_m01_rng_cache_bytes() {
+-    return sizeof(atlas::momentum::rng_cache);
++    return sizeof(atlas::momentum::rng_cache) + sizeof(atlas::momentum::rng_cache_next_way);
+ }

@@ -1,0 +1,248 @@
+diff --git a/atlas/muon/columnar/raw_input.py b/atlas/muon/columnar/raw_input.py
+--- a/atlas/muon/columnar/raw_input.py
++++ b/atlas/muon/columnar/raw_input.py
+@@ -103,8 +103,49 @@
+     return numpy(ak.flatten(array, axis=1), dtype)
+ 
+ 
+-@dataclass(frozen=True)
+-class LinkRows:
++EFFICIENCY_LANES = ("random_run_number", "pt", "eta", "phi", "charge", "muon_type", "gate")
++
++
++class EfficiencyRows:
++    """Keep selected input rows in source order and one real skipped row at the end."""
++
++    def __init__(self, random_run_number, pt, eta, phi, charge, muon_type, gate):
++        self.size = gate.size
++        selected = gate == 1
++        self.selected_indices = np.flatnonzero(selected)
++        self.selected_size = self.selected_indices.size
++        lanes = (random_run_number, pt, eta, phi, charge, muon_type, gate)
++
++        zero = gate == 0
++        # Keep the original ordered calls for an invalid gate so the native
++        # state-membership and gate errors retain their original precedence.
++        self.compacted = self.selected_size < self.size and np.all(selected | zero)
++        if self.compacted:
++            indices = np.empty(self.selected_size + 1, dtype=np.intp)
++            indices[:-1] = self.selected_indices
++            indices[-1] = np.argmax(zero)
++            lanes = tuple(values[indices] for values in lanes)
++        self.lanes = lanes
++        self.gate = lanes[-1]
++        self.selected_pt = self.selected_values(lanes[1])
++
++    def selected_values(self, values):
++        if not self.compacted and self.selected_size < self.size:
++            return values[self.selected_indices]
++        return values[:self.selected_size]
++
++    def expand(self, values):
++        """Restore original object order using the correction's skipped result."""
++        if not self.compacted:
++            return values
++        dense = np.empty((self.size, *values.shape[1:]), dtype=values.dtype)
++        dense[:] = values[-1]
++        dense[self.selected_indices] = values[:-1]
++        return dense
++
++
++@dataclass(frozen=True)
++class LinkRows:
+     key: np.ndarray
+     index: np.ndarray
+     valid: np.ndarray
+diff --git a/atlas/muon/columnar/muon_analysis.py b/atlas/muon/columnar/muon_analysis.py
+--- a/atlas/muon/columnar/muon_analysis.py
++++ b/atlas/muon/columnar/muon_analysis.py
+@@ -6,7 +6,7 @@
+ import numpy as np
+ 
+ from raw_input import (
+-    COV_DIAG, COV_OFF, MOMENTUM_ROLES, PERIGEE_FIELDS, SELECTION_ROLES,
++    COV_DIAG, COV_OFF, EFFICIENCY_LANES, MOMENTUM_ROLES, PERIGEE_FIELDS, SELECTION_ROLES, EfficiencyRows,
+     TRACK_SUMMARIES, UINT32_MAX, VERTEX_PREFIX, flat, numpy,
+ )
+ 
+@@ -93,8 +93,10 @@
+     kinematic_state: str
+     momentum: dict
+     selection: dict
+-    efficiency: dict
+-    combined_weight: np.ndarray
++    histogram_pt: np.ndarray
++    histogram_weight: np.ndarray
++    efficiency: dict | None = None
++    combined_weight: np.ndarray | None = None
+ 
+ 
+ class NativeWorkflow:
+@@ -106,7 +108,8 @@
+         paths = [path.resolve() for path in (momentum_payload, selection_payload, efficiency_payload)]
+         payloads = {path: _core.CorrectionSet.from_file(str(path)) for path in dict.fromkeys(paths)}
+         momentum, selection, efficiency = (payloads[path] for path in paths)
+-        trace_width = len(MOMENTUM_OUTPUTS) + len(TRACE_OUTPUTS)
++        self.observe = observe
++        trace_width = len(MOMENTUM_OUTPUTS) + len(TRACE_OUTPUTS)
+         self.momentum = Correction(momentum["muon_momentum"], (12, trace_width) if observe else (12,))
+         self.eta_gate = Correction(selection["muon_selection_eta"], (0,))
+         self.vertex_kind = Correction(selection["muon_selection_vertex"], (0,))
+@@ -122,31 +125,38 @@
+         efficiencies = {}
+         for state in plan.states:
+             kin_state = plan.kinematics_for(state)
+-            if kin_state not in kinematics:
+-                kinematics[kin_state] = self.calibrate(kin_state, common, selection_inputs)
+-            calibrated, selected = kinematics[kin_state]
+-
+-            weights = {}
+-            for name, node in self.efficiency.items():
+-                source_state = plan.efficiency_for(state, name)
+-                key = name, kin_state, source_state
+-                if key not in efficiencies:
+-                    gate = selected["final"]
+-                    result = node(
+-                        state=source_state, random_run_number=common["random_run_number"],
+-                        pt=calibrated["pt"], eta=calibrated["eta"], phi=calibrated["phi"],
+-                        charge=calibrated["charge"], muon_type=common["muon_type"], gate=gate,
+-                    )
+-                    invalid = np.where(gate == 1, (result[:, 1] != CP_OK) & (result[:, 1] != CP_OOV),
+-                                       result[:, 1] != SKIPPED)
+-                    if invalid.any():
+-                        raise RuntimeError(f"Release {name} efficiency call/status mismatch for {state}")
+-                    efficiencies[key] = result
+-                weights[name] = efficiencies[key]
+-
+-            combined = self.product(reco_sf=weights["reco"][:, 0], iso_sf=weights["isol"][:, 0],
+-                                    ttva_sf=weights["TTVA"][:, 0])
+-            yield state, StateResult(kin_state, calibrated, selected, weights, combined)
++            if kin_state not in kinematics:
++                calibrated, selected = self.calibrate(kin_state, common, selection_inputs)
++                rows = EfficiencyRows(
++                    common["random_run_number"], calibrated["pt"], calibrated["eta"], calibrated["phi"],
++                    calibrated["charge"], common["muon_type"], selected["final"],
++                )
++                inputs = dict(zip(EFFICIENCY_LANES, rows.lanes, strict=True))
++                kinematics[kin_state] = calibrated, selected, rows, inputs
++            calibrated, selected, rows, inputs = kinematics[kin_state]
++
++            weights = {}
++            observed = {} if self.observe else None
++            for name, node in self.efficiency.items():
++                source_state = plan.efficiency_for(state, name)
++                key = name, kin_state, source_state
++                if key not in efficiencies:
++                    result = node(state=source_state, **inputs)
++                    status = result[:, 1]
++                    invalid = np.where(rows.gate == 1, (status != CP_OK) & (status != CP_OOV), status != SKIPPED)
++                    if invalid.any():
++                        raise RuntimeError(f"Release {name} efficiency call/status mismatch for {state}")
++                    efficiencies[key] = result[:, 0], rows.expand(result) if self.observe else None
++                sf, dense_result = efficiencies[key]
++                weights[name] = sf
++                if observed is not None:
++                    observed[name] = dense_result
++
++            combined = self.product(reco_sf=weights["reco"], iso_sf=weights["isol"], ttva_sf=weights["TTVA"])
++            yield state, StateResult(
++                kin_state, calibrated, selected, rows.selected_pt, rows.selected_values(combined),
++                observed, rows.expand(combined) if self.observe else None,
++            )
+ 
+     def prepare(self, chunk):
+         event_number = chunk.broadcast_event("eventNumber", np.uint64)
+diff --git a/atlas/muon/columnar/run_muons.py b/atlas/muon/columnar/run_muons.py
+--- a/atlas/muon/columnar/run_muons.py
++++ b/atlas/muon/columnar/run_muons.py
+@@ -110,8 +110,7 @@
+                 chunk = MuonChunk(columns, first, workflow["links"])
+                 current = ChunkObservations(chunk, plan) if observer else None
+                 for state, result in nodes.apply(chunk, plan):
+-                    passed = result.selection["final"] == 1
+-                    histograms.fill(state, result.momentum["pt"][passed], result.combined_weight[passed])
++                    histograms.fill(state, result.histogram_pt, result.histogram_weight)
+                     if current:
+                         current.add(state, result)
+                 if current:
+diff --git a/atlas/muon/measure_columnar_phases.py b/atlas/muon/measure_columnar_phases.py
+--- a/atlas/muon/measure_columnar_phases.py
++++ b/atlas/muon/measure_columnar_phases.py
+@@ -30,8 +30,14 @@
+         result = self.node(**arguments)
+         self.times[self.stage] += time.perf_counter() - start
+         self.calls[self.stage] += 1
+-        self.lanes[self.stage] += result.shape[0]
+-        return result
++        self.lanes[self.stage] += result.shape[0]
++        if "gate" in arguments:
++            gate = arguments["gate"]
++            self.lanes[f"{self.stage}_selected"] += np.count_nonzero(gate == 1)
++            skipped = np.count_nonzero(gate == 0)
++            self.lanes[f"{self.stage}_skipped"] += skipped
++            self.lanes[f"{self.stage}_batches_with_skips"] += int(skipped != 0)
++        return result
+ 
+ 
+ class MeasuredWorkflow(NativeWorkflow):
+@@ -72,8 +78,7 @@
+             timings["chunk_construction"] += time.perf_counter() - start
+             for state, result in native.apply(chunk, states):
+                 start = time.perf_counter()
+-                selected = result.selection["final"] == 1
+-                target.fill(state, result.momentum["pt"][selected], result.combined_weight[selected])
++                target.fill(state, result.histogram_pt, result.histogram_weight)
+                 timings["histogram_fill"] += time.perf_counter() - start
+         input_source = source.file.source
+         bytes_requested = input_source.num_requested_bytes
+diff --git a/atlas/muon/portable/muon_demo.py.in b/atlas/muon/portable/muon_demo.py.in
+--- a/atlas/muon/portable/muon_demo.py.in
++++ b/atlas/muon/portable/muon_demo.py.in
+@@ -23,7 +23,8 @@
+ import atlas_muon_portable
+ from atlas_muon_portable.packing import order, pack_momentum, pack_selection
+ from atlas_muon_portable.raw_input import (
+-    MUON_PREFIX, SELECTION_ROLES, VERTEX_PREFIX, MuonChunk, branch_plan, check_branches, flat, numpy, verify_file,
++    MUON_PREFIX, SELECTION_ROLES, VERTEX_PREFIX, EfficiencyRows, MuonChunk,
++    branch_plan, check_branches, flat, numpy, verify_file,
+ )
+ from atlas_muon_portable.runtime import record_runtime
+ import awkward as ak
+@@ -181,25 +182,29 @@
+                             "id_pt": m[:, 8], "me_pt": m[:, 9],
+                             "calibrated_track_momenta_available": ((masks & 12) == 12).astype(np.int64),
+                         }))
+-                        kinematics[kin_state] = m, chosen[:, 5].astype(np.int64)
+-
+-                    m, gate = kinematics[kin_state]
++                        # Keep selected rows in source order with one actual
++                        # skipped row for the efficiency nodes' state checks.
++                        kinematics[kin_state] = EfficiencyRows(
++                            random_run, m[:, 3], m[:, 4], m[:, 5], m[:, 7], muon_type, chosen[:, 5].astype(np.int64),
++                        )
++
++                    rows = kinematics[kin_state]
+                     owner = state.split("_", 3)[2] if state in weight_only else None
+                     factors = {}
+                     for label, node in efficiency_nodes.items():
+                         sf_state = state if owner == label else "NOSYS"
+                         key = label, kin_state, sf_state
+                         if key not in efficiency_results:
+-                            sf = node.evalv(sf_state, random_run, m[:, 3], m[:, 4], m[:, 5], m[:, 7], muon_type, gate)
+-                            bad = np.where(gate == 1, (sf[:, 1] != 1) & (sf[:, 1] != 2), sf[:, 1] != -1)
++                            sf = node.evalv(sf_state, *rows.lanes)
++                            status = sf[:, 1]
++                            bad = np.where(rows.gate == 1, (status != 1) & (status != 2), status != -1)
+                             if bad.any():
+                                 raise RuntimeError(f"Efficiency call or status mismatch in {label} / {state}")
+                             efficiency_results[key] = sf[:, 0]
+                         factors[label] = efficiency_results[key]
+                     weights = combined_efficiency.evalv(factors["RECO"], factors["ISO"], factors["TTVA"])
+-                    selected = gate == 1
+-                    pt_gev = m[selected, 3] / 1000.
+-                    weights = weights[selected]
++                    pt_gev = rows.selected_pt / 1000.
++                    weights = rows.selected_values(weights)
+                     if not np.isfinite(pt_gev).all() or not np.isfinite(weights).all():
+                         raise ValueError(f"Non-finite selected histogram input in {state}")
+                     weighted.fill(pt_gev, state, weight=weights, threads=1)
